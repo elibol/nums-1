@@ -21,6 +21,7 @@ from nums.core.systems.systems import System
 from nums.core.array import utils as array_utils
 
 block_id_counter = -1
+block_array_id_counter = -1
 
 
 class Block(object):
@@ -29,7 +30,7 @@ class Block(object):
     #  Do this when we implement a SparseBlock object.
 
     def __init__(self, grid_entry, grid_shape, rect, shape, dtype, transposed, system: System,
-                 id=None):
+                 id=None, block_array=None):
         self._system = system
         self.grid_entry: tuple = grid_entry
         self.grid_shape: tuple = grid_shape
@@ -44,6 +45,7 @@ class Block(object):
             global block_id_counter
             block_id_counter += 1
             self.id = block_id_counter
+        self.block_array = block_array
 
     def __repr__(self):
         return "Block(" + str(self.oid) + ")"
@@ -355,6 +357,9 @@ class BlockArrayBase(object):
         self.ndim = len(self.shape)
         self.dtype = self.grid.dtype
         self.blocks = blocks
+        global block_array_id_counter
+        block_array_id_counter += 1
+        self.id = block_array_id_counter
         if self.blocks is None:
             # TODO (hme): Subclass np.ndarray for self.blocks instances,
             #  and override key methods to better integrate with NumPy's ufuncs.
@@ -366,7 +371,8 @@ class BlockArrayBase(object):
                                                 shape=self.grid.get_block_shape(grid_entry),
                                                 dtype=self.dtype,
                                                 transposed=False,
-                                                system=self.system)
+                                                system=self.system,
+                                                block_array=self)
 
     def __repr__(self):
         return "BlockArray(" + str(self.blocks) + ")"

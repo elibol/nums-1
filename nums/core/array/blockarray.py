@@ -585,9 +585,33 @@ class BlockArray(BlockArrayBase):
 
     def __add__(self, other):
         other = self.check_or_convert_other(other)
-        return BlockArray.from_blocks(self.blocks + other.blocks,
-                                      result_shape=None,
-                                      system=self.system)
+        if self.shape == other.shape:
+            # Do a non-broadcasting element-wise add.
+            grid: ArrayGrid = self.grid.copy()
+            result: BlockArray = BlockArray(grid, self.system)
+            for grid_entry in grid.get_entry_iterator():
+                self_block: Block = self.blocks[grid_entry]
+                other_block: Block = other.blocks[grid_entry]
+                result_block: Block = result.blocks[grid_entry]
+                syskwargs = {
+                    "ba1_id": self.id,
+                    "b1_id": self_block.id,
+                    "ba2_id": other.id,
+                    "b2_id": other_block.id,
+                    "bar_id": result.id,
+                    "br_id": result_block.id,
+                    "grid_entry": result_block.grid_entry,
+                    "grid_shape": result_block.grid_shape,
+                }
+                result_block.oid = self.system.bop("add", self_block.oid, other_block.oid,
+                                                   self_block.shape, other_block.shape,
+                                                   self_block.transposed, other_block.transposed,
+                                                   axes=None, syskwargs=syskwargs)
+            return result
+        else:
+            return BlockArray.from_blocks(self.blocks + other.blocks,
+                                          result_shape=None,
+                                          system=self.system)
 
     def __sub__(self, other):
         other = self.check_or_convert_other(other)
