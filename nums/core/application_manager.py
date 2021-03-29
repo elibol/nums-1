@@ -16,11 +16,12 @@
 
 import logging
 import sys
-
+import time
 from nums.core import settings
 from nums.core.systems.filesystem import FileSystem
 from nums.core.systems import numpy_compute
 from nums.core.systems.systems import System, SerialSystem, RaySystem
+from nums.core.systems.gpu_systems import CupyParallelSystem
 from nums.core.systems.schedulers import RayScheduler, TaskScheduler, BlockCyclicScheduler
 from nums.core.array.application import ArrayApplication
 
@@ -71,6 +72,11 @@ def create():
                                                        use_head=settings.use_head)
         system: System = RaySystem(compute_module=compute_module,
                                    scheduler=scheduler)
+    elif system_name == "cupy-parallel":
+        # use cupy_compute as compute module internally
+        system = CupyParallelSystem()
+        system.num_gpus = settings.num_gpus
+        system.cluster_shape = (settings.num_gpus, 1)
     else:
         raise Exception()
     system.init()
@@ -82,10 +88,16 @@ def destroy():
     if _instance is None:
         return
     # This will shutdown ray if ray was started by NumS.
-    _instance.system.shutdown()
-    del _instance
-    _instance = None
 
+    system = _instance.system
+    del _instance.one_half
+    del _instance.two
+    del _instance.one
+    del _instance.zero
+    del _instance
+    system.shutdown()
+    # _instance.system.shutdown()
+    
 
 def configure_logging():
     root = logging.getLogger()

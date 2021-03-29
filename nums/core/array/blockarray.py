@@ -48,7 +48,7 @@ class BlockArray(BlockArrayBase):
         if isinstance(val, int):
             dtype = np.int
         elif isinstance(val, float):
-            dtype = np.float
+            dtype = np.float32
         else:
             assert isinstance(val, (np.int32, np.int64, np.float32, np.float64))
             dtype = None
@@ -122,7 +122,6 @@ class BlockArray(BlockArrayBase):
         for grid_entry in self.grid.get_entry_iterator():
             block: Block = self.blocks[grid_entry]
             oids.append(self.system.touch(block.oid, syskwargs=block.syskwargs()))
-        self.system.get(oids)
         return self
 
     def reshape(self, *shape, **kwargs):
@@ -714,7 +713,7 @@ class BlockArray(BlockArrayBase):
         return other ** self
 
     def __neg__(self):
-        return -1 * self
+        return -1.0 * self
 
     def __pos__(self):
         return self
