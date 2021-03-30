@@ -21,10 +21,9 @@ import numpy as np
 import scipy.special
 
 from nums.core.storage.storage import ArrayGrid
-from nums.core.optimizer.cluster_sim import ClusterState
 from nums.core.array.base import BlockArrayBase, Block
-from nums.core.systems.systems import System
 from nums.core.array import utils as array_utils
+from nums.experimental.optimizer.cluster_sim import ClusterState
 
 
 def subsample(total_items, max_items, rs: np.random.RandomState):

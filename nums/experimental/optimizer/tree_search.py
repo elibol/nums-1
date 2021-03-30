@@ -17,7 +17,7 @@
 from typing import Union
 import numpy as np
 
-from nums.core.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
+from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
 
 
 random_state = np.random.RandomState(1337)
