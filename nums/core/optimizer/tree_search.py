@@ -55,17 +55,17 @@ class ProgramState(object):
         # This is hacky, but no good way to do it w/ current abstractions.
         if isinstance(tnode, BinaryOp):
             grid_entry = self.get_tnode_grid_entry(tnode)
-            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry)
+            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry, self.arr.grid.grid_shape)
             actions = [(tnode.tree_node_id, {"node_id": node_id})]
         elif isinstance(tnode, ReductionOp):
             leaf_ids = tuple(tnode.leafs_dict.keys())[:2]
             grid_entry = self.get_tnode_grid_entry(tnode)
-            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry)
+            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry, self.arr.grid.grid_shape)
             actions = [(tnode.tree_node_id, {"node_id": node_id,
                                              "leaf_ids": leaf_ids})]
         elif isinstance(tnode, UnaryOp):
             grid_entry = self.get_tnode_grid_entry(tnode)
-            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry)
+            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry, self.arr.grid.grid_shape)
             actions = [(tnode.tree_node_id, {"node_id": node_id})]
         else:
             raise Exception()
@@ -120,9 +120,8 @@ class ProgramState(object):
         return self.objective(new_resources)
 
     def objective(self, resources):
-        max_axes = tuple(np.arange(1, len(self.arr.cluster_state.cluster_shape) + 1))
         # Our simple objective.
-        return np.sum(np.max(resources, axis=max_axes))
+        return np.sum(resources[1:])
 
     def get_tnode_grid_entry(self, tnode: TreeNode):
         if tnode.parent is None:

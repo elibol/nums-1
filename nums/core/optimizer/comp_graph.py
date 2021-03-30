@@ -750,7 +750,7 @@ class GraphArray(object):
         for grid_entry in ba.grid.get_entry_iterator():
             block: Block = ba.blocks[grid_entry]
             # Allocate the block to the node on which it's created.
-            node_id = cluster_state.get_cluster_entry(block.true_grid_entry())
+            node_id = cluster_state.get_cluster_entry(block.true_grid_entry(), ba.grid.grid_shape)
             cluster_state.add_block(block, node_ids=[node_id])
             cluster_state.init_mem_load(node_id, block.id)
 

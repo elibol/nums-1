@@ -23,11 +23,11 @@ from nums.core.array import utils as array_utils
 from nums.core.storage.storage import ArrayGrid, StoredArray, StoredArrayS3
 # TODO(hme): Remove dependence on specific system and scheduler implementations.
 from nums.core.systems.systems import System, RaySystem, SerialSystem
+from nums.core.systems.gpu_systems import CupyParallelSystem
 from nums.core.systems.schedulers import BlockCyclicScheduler
 from nums.core.systems import utils as systems_utils
 from nums.core.systems.filesystem import FileSystem
 from nums.core.array.random import NumsRandomState
-
 
 # pylint: disable = too-many-lines
 
@@ -51,6 +51,9 @@ class ArrayApplication(object):
             system: RaySystem = self.system
             nodes = system.nodes()
             num_cores = sum(map(lambda n: n["Resources"]["CPU"], nodes))
+        elif isinstance(self.system, CupyParallelSystem):
+            system: CupyParallelSystem = self.system
+            num_cores = system.num_gpus
         else:
             assert isinstance(self.system, SerialSystem)
             num_cores = systems_utils.get_num_cores()
@@ -93,6 +96,8 @@ class ArrayApplication(object):
                 and isinstance(self.system.scheduler, BlockCyclicScheduler):
             # This configuration is the default.
             cluster_shape = self.system.scheduler.cluster_shape
+        elif isinstance(self.system, CupyParallelSystem):
+            cluster_shape = self.system.cluster_shape
         else:
             assert isinstance(self.system, SerialSystem)
             cluster_shape = (1, 1)

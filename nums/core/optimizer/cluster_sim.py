@@ -52,28 +52,14 @@ class ClusterState(object):
     def get_cluster_entry_iterator(self):
         return itertools.product(*map(range, self.cluster_shape))
 
-    def get_cluster_entry(self, grid_entry):
-        cluster_entry = []
-        num_grid_entry_axes = len(grid_entry)
-        num_cluster_axes = len(self.cluster_shape)
-        if num_grid_entry_axes <= num_cluster_axes:
-            # When array has fewer or equal # of axes than cluster.
-            for cluster_axis in range(num_cluster_axes):
-                if cluster_axis < num_grid_entry_axes:
-                    cluster_dim = self.cluster_shape[cluster_axis]
-                    grid_entry_dim = grid_entry[cluster_axis]
-                    cluster_entry.append(grid_entry_dim % cluster_dim)
-                else:
-                    cluster_entry.append(0)
-        elif num_grid_entry_axes > num_cluster_axes:
-            # When array has more axes then cluster.
-            for cluster_axis in range(num_cluster_axes):
-                cluster_dim = self.cluster_shape[cluster_axis]
-                grid_entry_dim = grid_entry[cluster_axis]
-                cluster_entry.append(grid_entry_dim % cluster_dim)
-            # Ignore trailing axes, as these are "cycled" to 0 by assuming
-            # the dimension of those cluster axes is 1.
-        return tuple(cluster_entry)
+    def get_cluster_entry(self, grid_entry, grid_shape):
+        ret = [0]
+        for i in range(len(grid_entry)):
+            dim = 1 if i == len(grid_entry) - 1 else grid_shape[i+1]
+            ret[0] = (ret[0] + grid_entry[i]) * dim
+        ret[0] = ret[0] % self.system.num_gpus
+        ret.append(0)
+        return tuple(ret)
 
     # Block Ops.
 
