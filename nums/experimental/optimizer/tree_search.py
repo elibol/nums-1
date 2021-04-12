@@ -152,6 +152,16 @@ class ProgramState(object):
 
 
 class TreeSearch(object):
+    """
+    Tree search base class.
+    - seed is supported for stochastic tree search algorithms.
+    - max_samples_per_step is the number of vertices from the frontier sampled per step.
+      If this is None, then the entire frontier is considered.
+    - max_reduction_pairs is a parameter provided to the reduction vertex in the computation tree.
+      The reduction vertex may have high fan-in, and scheduling is performed sequentially by
+      considering random pairs of input vertices. This parameter reduces the number of random
+      input pairs considered when generating the invocable actions on a reduction node.
+    """
 
     def __init__(self,
                  seed: Union[int, np.random.RandomState] = 1337,

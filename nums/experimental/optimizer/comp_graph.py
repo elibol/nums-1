@@ -805,6 +805,15 @@ class GraphArray(object):
             return other
         return self.from_ba(other, self.cluster_state)
 
+    def _tree_reduce(self, op, tree_nodes):
+        add_reduce_op = ReductionOp()
+        add_reduce_op.cluster_state = self.cluster_state
+        add_reduce_op.op_name = "add"
+        add_reduce_op.copy_on_op = self.copy_on_op
+        # dot_node.parent = add_reduce_op
+        # add_reduce_op.add_child(dot_node)
+        # result_graphs[grid_entry] = add_reduce_op
+
     def tensordot(self, other, axes=2):
         other = self.other_to_ba(other)
         # TODO: Reuse BlockArrayBase tensordot operator.

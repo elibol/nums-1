@@ -453,6 +453,7 @@ class ArrayApplication(object):
             start = block_shape[0] * grid_entry[0]
             entry_shape = grid.get_block_shape(grid_entry)
             stop = start + entry_shape[0]
+            np.arange
             rarr.blocks[grid_entry].oid = self.system.arange(start,
                                                              stop,
                                                              step,
@@ -629,6 +630,9 @@ class ArrayApplication(object):
                     axis_result = self.concatenate(block_arrays, 0, result_block_shape[0])
                 result_arrays.append(axis_result)
             return tuple(result_arrays)
+
+    def isnan(self, X: BlockArray):
+        return self.map_uop("isnan", X)
 
     def map_uop(self,
                 op_name: str,
