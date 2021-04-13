@@ -91,7 +91,7 @@ class TreeNode(object):
     def simulate_on(self, node_id, leaf_ids=None) -> np.ndarray:
         raise NotImplementedError()
 
-    def execute_on(self, node_id, leaf_ids=None):
+    def execute_on(self, node_id, leaf_ids=None, plan_only=False):
         raise NotImplementedError()
 
     def shape(self):
@@ -241,10 +241,10 @@ class UnaryOp(TreeNode):
                                                     resources)
         return resources
 
-    def execute_on(self, node_id, leaf_ids=None) -> Leaf:
+    def execute_on(self, node_id, leaf_ids=None, plan_only=False) -> Leaf:
         assert leaf_ids is None
         assert isinstance(self.child, Leaf)
-        result = self._collapse(node_id)
+        result = self._collapse(node_id, plan_only)
         new_leaf: Leaf = result[0]
         new_leaf.cluster_state = self.cluster_state
         new_block: Block = result[1]
@@ -258,16 +258,16 @@ class UnaryOp(TreeNode):
             self.parent.update_child([self], [new_leaf])
         return new_leaf
 
-    def _collapse(self, node_id):
+    def _collapse(self, node_id, plan_only):
         assert isinstance(self.child, Leaf)
         block: Block = self.cluster_state.get_block(self.child.block_id)
         op_name, args = self.op_name,  {}
         options: dict = self.cluster_state.system.get_options(node_id,
                                                               self.cluster_state.cluster_shape)
         if op_name == "transpose":
-            block: Block = block.transpose()
+            block: Block = block.transpose(plan_only=plan_only)
         else:
-            block: Block = block.ufunc(op_name, options=options)
+            block: Block = block.ufunc(op_name, options=options, plan_only=plan_only)
         leaf: Leaf = Leaf()
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op
@@ -374,7 +374,7 @@ class BinaryOp(TreeNode):
                                                    resources)
         return resources
 
-    def execute_on(self, node_id, leaf_ids=None) -> Leaf:
+    def execute_on(self, node_id, leaf_ids=None, plan_only=False) -> Leaf:
         """
         Update cluster state to reflect the cluster's load after computing this node.
         We generate a leaf node for BinaryOp, updating the leaf node's computation
@@ -382,7 +382,7 @@ class BinaryOp(TreeNode):
         """
         assert leaf_ids is None
         assert isinstance(self.left, Leaf) and isinstance(self.right, Leaf)
-        result = self._collapse(node_id)
+        result = self._collapse(node_id, plan_only)
         new_leaf: Leaf = result[0]
         new_leaf.cluster_state = self.cluster_state
         new_block: Block = result[1]
@@ -405,7 +405,7 @@ class BinaryOp(TreeNode):
             self.parent.update_child([self], [new_leaf])
         return new_leaf
 
-    def _collapse(self, node_id):
+    def _collapse(self, node_id, plan_only):
         assert isinstance(self.left, Leaf) and isinstance(self.right, Leaf)
         lblock: Block = self.cluster_state.get_block(self.left.block_id)
         rblock: Block = self.cluster_state.get_block(self.right.block_id)
@@ -418,7 +418,7 @@ class BinaryOp(TreeNode):
             assert array_utils.can_broadcast_shapes(lblock.shape, rblock.shape)
         options: dict = self.cluster_state.system.get_options(node_id,
                                                               self.cluster_state.cluster_shape)
-        block: Block = lblock.bop(op_name, rblock, args=args, options=options)
+        block: Block = lblock.bop(op_name, rblock, args=args, options=options, plan_only=plan_only)
         leaf: Leaf = Leaf()
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op
@@ -635,9 +635,9 @@ class ReductionOp(TreeNode):
                                                    resources)
         return resources
 
-    def execute_on(self, node_id, leaf_ids=None) -> TreeNode:
+    def execute_on(self, node_id, leaf_ids=None, plan_only=False) -> TreeNode:
         """
-        The can return:
+        This can return:
         - Another ReductionOp.
         - A BinaryOp.
         """
@@ -645,7 +645,7 @@ class ReductionOp(TreeNode):
         leafs = self.leafs_dict[leaf_ids[0]], self.leafs_dict[leaf_ids[1]]
         left, right = leafs
         assert isinstance(left, Leaf) and isinstance(right, Leaf)
-        result = self._collapse(node_id, left, right)
+        result = self._collapse(node_id, left, right, plan_only=plan_only)
         new_leaf: Leaf = result[0]
         new_leaf.cluster_state = self.cluster_state
         new_block: Block = result[1]
@@ -702,7 +702,7 @@ class ReductionOp(TreeNode):
         else:
             raise Exception("Unexpected number of children %d" % len(self.children_dict))
 
-    def _collapse(self, node_id, left: Leaf, right: Leaf):
+    def _collapse(self, node_id, left: Leaf, right: Leaf, plan_only):
         lblock: Block = self.cluster_state.get_block(left.block_id)
         rblock: Block = self.cluster_state.get_block(right.block_id)
         if self.op_name == "matmul":
@@ -713,7 +713,7 @@ class ReductionOp(TreeNode):
             assert lblock.shape == rblock.shape
         options: dict = self.cluster_state.system.get_options(node_id,
                                                               self.cluster_state.cluster_shape)
-        block: Block = lblock.bop(op_name, rblock, args=args, options=options)
+        block: Block = lblock.bop(op_name, rblock, args=args, options=options, plan_only=plan_only)
         leaf: Leaf = Leaf()
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op
@@ -806,6 +806,8 @@ class GraphArray(object):
         return self.from_ba(other, self.cluster_state)
 
     def _tree_reduce(self, op, tree_nodes):
+        # Need this now.
+        # Make sure consturction is deterministic.
         add_reduce_op = ReductionOp()
         add_reduce_op.cluster_state = self.cluster_state
         add_reduce_op.op_name = "add"

@@ -18,9 +18,20 @@ from typing import Union
 import numpy as np
 
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
-
+from nums.experimental.optimizer.cluster_sim import ClusterState
 
 random_state = np.random.RandomState(1337)
+
+
+class TreeNodeActionPair(object):
+    """
+    Node corresponds to the tree node on which the given actions can be performed.
+    Actions are a list of arguments that can be invoked on either
+    TreeNode.simulate_on or TreeNode.execute_on.
+    """
+    def __init__(self, node: TreeNode, actions: list):
+        self.node: TreeNode = node
+        self.actions: list = actions
 
 
 class ProgramState(object):
@@ -28,12 +39,17 @@ class ProgramState(object):
     def __init__(self, arr: GraphArray,
                  max_reduction_pairs=None,
                  force_final_action=True,
-                 unique_reduction_pairs=False):
+                 unique_reduction_pairs=False,
+                 plan_only=False):
         self.arr: GraphArray = arr
         self.force_final_action = force_final_action
         self.get_action_kwargs = {"max_reduction_pairs": max_reduction_pairs,
                                   "unique_reduction_pairs": unique_reduction_pairs}
-        self.tnode_map = {}
+        self.plan_only = plan_only
+        # Keys are tree_node_id
+        # Values are a 2-tuple corresponding to the actual tree node and the actions that can
+        # be performed on that tree node.
+        self.tnode_map: [str, TreeNodeActionPair] = {}
         self.init_frontier()
 
     def num_nodes(self):
@@ -83,16 +99,16 @@ class ProgramState(object):
                 actions = self.get_bc_action(tnode)
         if actions is None:
             actions = tnode.get_actions(**self.get_action_kwargs)
-        self.tnode_map[tnode.tree_node_id] = (tnode, actions)
+        self.tnode_map[tnode.tree_node_id] = TreeNodeActionPair(tnode, actions)
 
     def copy(self):
         return ProgramState(self.arr.copy())
 
     def commit_action(self, action):
         tnode_id, kwargs = action
-        entry = self.tnode_map[tnode_id]
-        old_node: TreeNode = entry[0]
-        new_node: TreeNode = old_node.execute_on(**kwargs)
+        entry: TreeNodeActionPair = self.tnode_map[tnode_id]
+        old_node: TreeNode = entry.node
+        new_node: TreeNode = old_node.execute_on(**kwargs, plan_only=self.plan_only)
         # The frontier needs to be updated, so remove the current node from frontier.
         del self.tnode_map[tnode_id]
         if old_node.parent is None and old_node is not new_node:
@@ -114,8 +130,8 @@ class ProgramState(object):
 
     def simulate_action(self, action):
         tnode_id, kwargs = action
-        entry = self.tnode_map[tnode_id]
-        node: TreeNode = entry[0]
+        entry: TreeNodeActionPair = self.tnode_map[tnode_id]
+        node: TreeNode = entry.node
         new_resources: np.ndarray = node.simulate_on(**kwargs)
         return self.objective(new_resources)
 
@@ -147,7 +163,7 @@ class ProgramState(object):
         # This is not deterministic due to hashing of children for reduction nodes.
         actions = []
         for tnode_id in self.tnode_map:
-            actions += self.tnode_map[tnode_id][1]
+            actions += self.tnode_map[tnode_id].actions
         return actions
 
 
@@ -212,7 +228,7 @@ class BlockCyclicTS(TreeSearch):
             return state, state.objective(state.arr.cluster_state.resources), True
         action = None
         for tnode_id in state.tnode_map:
-            action = state.get_bc_action(state.tnode_map[tnode_id][0])[0]
+            action = state.get_bc_action(state.tnode_map[tnode_id].node)[0]
             break
         curr_cost = state.commit_action(action)
         return state, curr_cost, False
@@ -247,7 +263,7 @@ class RandomTS(TreeSearch):
                     tnode_id_sample.append(tnode_ids[i])
         actions = []
         for tnode_id in tnode_id_sample:
-            actions += state.tnode_map[tnode_id][1]
+            actions += state.tnode_map[tnode_id].actions
         return actions
 
     def step(self, state: ProgramState):
@@ -269,3 +285,94 @@ class RandomTS(TreeSearch):
                 min_cost = action_cost
         curr_cost = state.commit_action(min_action)
         return state, curr_cost, False
+
+
+class Plan(object):
+
+    def __init__(self, max_reduction_pairs, force_final_action):
+        self.max_reduction_pairs = max_reduction_pairs
+        self.force_final_action = force_final_action
+        self.plan = []
+
+    def append(self, cluster_state, action, cost, next_cluster_state, is_done):
+        self.plan.append((cluster_state, action, cost, next_cluster_state, is_done))
+
+    def execute(self, arr: GraphArray):
+        arr = arr.copy()
+        state: ProgramState = ProgramState(arr,
+                                           max_reduction_pairs=self.max_reduction_pairs,
+                                           force_final_action=self.force_final_action)
+        for cluster_state, action, cost, next_cluster_state, is_done in self.plan:
+            # TODO (hme): Remove these inline tests once actual tests are added.
+            actual_cost = state.commit_action(action)
+            assert np.allclose(actual_cost, cost)
+            actual_cluster_state: ClusterState = state.arr.cluster_state
+            expected_cluster_state: ClusterState = next_cluster_state
+            assert np.allclose(actual_cluster_state.resources, expected_cluster_state.resources)
+            actua_is_done = len(state.tnode_map) == 0
+            assert actua_is_done == is_done
+        return state.arr
+
+
+class RandomPlan(object):
+
+    def __init__(self,
+                 seed: Union[int, np.random.RandomState] = 1337,
+                 max_samples_per_step=None,
+                 max_reduction_pairs=None,
+                 force_final_action=True):
+        if isinstance(seed, np.random.RandomState):
+            self.rs = seed
+        else:
+            assert isinstance(seed, (int, np.int))
+            self.rs = np.random.RandomState(seed)
+        self.max_samples_per_step = max_samples_per_step
+        self.max_reduction_pairs = max_reduction_pairs
+        self.force_final_action = force_final_action
+        self.plan = Plan(max_reduction_pairs, force_final_action)
+
+    def sample_actions(self, state: ProgramState) -> list:
+        if self.max_samples_per_step is None:
+            return state.get_all_actions()
+        # Subsample a set of frontier nodes to try next.
+        tnode_ids = list(state.tnode_map.keys())
+        num_tnodes = len(tnode_ids)
+        if num_tnodes <= self.max_samples_per_step:
+            tnode_id_sample = tnode_ids
+        else:
+            idx_set = set()
+            tnode_id_sample = []
+            while len(idx_set) < self.max_samples_per_step:
+                i = self.rs.randint(0, num_tnodes)
+                if i not in idx_set:
+                    idx_set.add(i)
+                    tnode_id_sample.append(tnode_ids[i])
+        actions = []
+        for tnode_id in tnode_id_sample:
+            actions += state.tnode_map[tnode_id].actions
+        return actions
+
+    def step(self, state: ProgramState):
+        actions = self.sample_actions(state)
+        i = self.rs.randint(0, len(actions))
+        action = actions[i]
+        cluster_state = state.arr.cluster_state.copy()
+        cost = state.commit_action(action)
+        next_cluster_state = state.arr.cluster_state.copy()
+        is_done = len(state.tnode_map) == 0
+        self.plan.append(cluster_state, action, cost, next_cluster_state, is_done)
+        return is_done
+
+    def solve(self, arr: GraphArray):
+        arr = arr.copy()
+        state: ProgramState = ProgramState(arr,
+                                           max_reduction_pairs=self.max_reduction_pairs,
+                                           force_final_action=self.force_final_action,
+                                           plan_only=True)
+        num_steps = 0
+        while True:
+            num_steps += 1
+            is_done = self.step(state)
+            if is_done:
+                break
+        return state.arr

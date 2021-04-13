@@ -68,7 +68,7 @@ class Block(object):
             return tuple(reversed(self.grid_shape))
         return self.grid_shape
 
-    def transpose(self):
+    def transpose(self, plan_only=False):
         # This operation does not move or modify the remote object.
         grid_entryT = tuple(reversed(self.grid_entry))
         grid_shapeT = tuple(reversed(self.grid_shape))
@@ -80,9 +80,10 @@ class Block(object):
                        dtype=self.dtype,
                        transposed=not self.transposed,
                        system=self._system)
+        if plan_only:
+            return blockT
         blockT.oid = self.oid
         return blockT
-
 
     def swapaxes(self, axis1, axis2):
         block = self.copy()
@@ -108,15 +109,17 @@ class Block(object):
                                          })
         return block
 
-    def ufunc(self, op_name, options=None):
-        return self.uop_map(op_name, options=options)
+    def ufunc(self, op_name, options=None, plan_only=False):
+        return self.uop_map(op_name, options=options, plan_only=plan_only)
 
-    def uop_map(self, op_name, args=None, kwargs=None, options=None):
+    def uop_map(self, op_name, args=None, kwargs=None, options=None, plan_only=False):
         # This retains transpose.
         block = self.copy()
         block.dtype = array_utils.get_uop_output_type(op_name, self.dtype)
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
+        if plan_only:
+            return block
         if options is None:
             block.oid = self._system.map_uop(op_name,
                                              self.oid,
@@ -213,7 +216,7 @@ class Block(object):
         block.oid = self._system.put(np.array(other, dtype=self.dtype))
         return block
 
-    def bop(self, op, other, args: dict, options=None):
+    def bop(self, op, other, args: dict, options=None, plan_only=False):
         if not isinstance(other, Block):
             other = self._block_from_other(other)
         if op == "tensordot":
@@ -263,6 +266,8 @@ class Block(object):
                       dtype=dtype,
                       transposed=False,
                       system=self._system)
+        if plan_only:
+            return block
 
         # TODO (hme): Get rid of requiring shape as param.
         if options is None:
