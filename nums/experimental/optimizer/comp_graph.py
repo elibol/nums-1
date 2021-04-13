@@ -799,6 +799,14 @@ class GraphArray(object):
                                                          new_ids=new_ids)
         return GraphArray(self.grid, new_cluster, graphs_copy)
 
+    def equivalent(self, other: GraphArray):
+        # All tree node IDs are identical
+        # Cluster state is identical
+        if not self.cluster_state.equivalent(other.cluster_state)):
+            return False
+        # Tree structure is identical
+        return True
+
     def to_blocks(self) -> np.ndarray:
         blocks: np.ndarray = np.empty(self.grid.grid_shape, dtype=Block)
         for grid_entry in self.grid.get_entry_iterator():

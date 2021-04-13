@@ -46,6 +46,9 @@ class ClusterState(object):
             new_cluster.block_nodes[block_id] = list(self.block_nodes[block_id])
         return new_cluster
 
+    def equivalent(self, other: ClusterState):
+        if (self.
+
     def get_cluster_node_ids(self):
         return list(self.get_cluster_entry_iterator())
 

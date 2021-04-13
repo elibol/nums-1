@@ -294,10 +294,16 @@ class Plan(object):
         self.force_final_action = force_final_action
         self.plan = []
 
+    def copy(self):
+        raise NotImplementedError()
+
     def append(self, cluster_state, action, cost, next_cluster_state, is_done):
         self.plan.append((cluster_state, action, cost, next_cluster_state, is_done))
 
-    def execute(self, arr: GraphArray):
+    def execute(self, arr_inp: GraphArray):
+        arr = arr.copy()
+        # Check that deep copy was correct 
+        assert arr_inp.equivalent(arr)
         state: ProgramState = ProgramState(arr,
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action)
@@ -308,9 +314,66 @@ class Plan(object):
             actual_cluster_state: ClusterState = state.arr.cluster_state
             expected_cluster_state: ClusterState = next_cluster_state
             assert np.allclose(actual_cluster_state.resources, expected_cluster_state.resources)
-            actua_is_done = len(state.tnode_map) == 0
-            assert actua_is_done == is_done
+            actual_is_done = len(state.tnode_map) == 0
+            assert actual_is_done == is_done
+
+        # Ensure that execute doesn't modify cluster state or tree structure
+        assert arr_inp.check_equivalent(arr)
         return state.arr
+
+
+class ExhaustivePlanner(object):
+    
+    def __init__(self, max_reduction_pairs, force_final_action):
+        self.max_reduction_pairs = max_reduction_pairs
+        self.force_final_action = force_final_action
+        self.plan = Plan(max_reduction_pairs, force_final_action)
+
+    # Generate an optimal plan via exhaustive search
+    def make_plan(self, state: ProgramState):
+        # Generate + save all possible plans and their associated costs
+        all_plans = []
+        make_plan_helper(self, state, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
+
+        # Find minimum cost plan 
+        min_cost = all_plans[0][1] # cost is the second entry in the tuples
+        for p in all_plans:
+            if p[1] < min_cost:
+                min_cost = p[1]
+                self.plan = p[0]
+
+    # Helper to make_plan: recursively generates all possible plans while tracking
+    # cumulative cost.
+    # all_plans: array of (Plan, int cost)
+    def make_plan_helper(self, state: ProgramState, cost, plan: Plan, all_plans):
+        # Get all actions possible from current frontier.
+        actions = self.get_frontier_actions(state)
+
+        # Base case: if no actions, return plan and cost
+        if len(actions) == 0:
+            all_plans.append((plan, cost))
+
+        # For each action, construct a new ProgramState that takes
+        # that action at this step. 
+        # Keep a running sum of the total cost so far.
+        for a in actions:
+            next_plan = plan.copy()
+            next_state = state.copy()
+            step_cost = next_state.commit_action(a)
+            next_cluster_state = state.arr.cluster_state.copy()
+            is_done = len(state.tnode_map) == 0
+            next_plan.append(cluster_state, action, cost, next_cluster_state, is_done)
+            make_plan(next_state, cost + step_cost, next_plan)
+
+    def get_frontier_actions(self, state: ProgramState):
+        # Get all frontier nodes.
+        tnode_ids = list(state.tnode_map.keys())
+        
+        # Collect all possible actions on each node.
+        actions = []
+        for tnode_id in tnode_ids:
+            actions += state.tnode_map[tnode_id].actions
+        return actions       
 
 
 class RandomPlan(object):
