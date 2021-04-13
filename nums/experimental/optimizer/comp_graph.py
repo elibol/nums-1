@@ -770,12 +770,19 @@ class GraphArray(object):
 
     def __init__(self, grid: ArrayGrid, cluster_state: ClusterState, graphs: np.ndarray,
                  copy_on_op=True):
+        # The ArrayGrid corresponding to the output of this GraphArray.
         self.grid = grid
+        # The (shared) cluster state with which this GraphArray is associated.
         self.cluster_state = cluster_state
+        # The shape of the output corresponding to this GraphArray.
         self.shape = self.grid.shape
+        # The block_shape of the output corresponding to this GraphArray.
         self.block_shape = self.grid.block_shape
         self.dtype = self.grid.dtype
+        # The graphs this data structure is comprised of.
         self.graphs = graphs
+        # Whether the graph array is copied whenever an operation is performed.
+        # See _add_uop for example.
         self.copy_on_op = copy_on_op
 
     def __repr__(self):

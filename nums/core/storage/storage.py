@@ -28,6 +28,15 @@ from nums.core.storage.utils import Batch
 
 class ArrayGrid(object):
     # TODO (hme): Move to array module.
+    """
+        Encapsulates key BlockArray values:
+         - shape
+         - block_shape
+         - grid_shape
+         - dtype
+        This class also provides support operations that provide the shape of a block,
+        its array coordinates, and its block coordinates.
+    """
 
     @classmethod
     def from_meta(cls, d: dict):

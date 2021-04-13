@@ -298,7 +298,6 @@ class Plan(object):
         self.plan.append((cluster_state, action, cost, next_cluster_state, is_done))
 
     def execute(self, arr: GraphArray):
-        arr = arr.copy()
         state: ProgramState = ProgramState(arr,
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action)
