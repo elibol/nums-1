@@ -102,7 +102,10 @@ class ProgramState(object):
         self.tnode_map[tnode.tree_node_id] = TreeNodeActionPair(tnode, actions)
 
     def copy(self):
-        return ProgramState(self.arr.copy())
+        return ProgramState(self.arr.copy(),
+                            **self.get_action_kwargs,
+                            force_final_action=self.force_final_action,
+                            plan_only=self.plan_only)
 
     def commit_action(self, action):
         tnode_id, kwargs = action
@@ -364,12 +367,15 @@ class RandomPlan(object):
         self.plan.append(cluster_state, tree_node, action, cost, next_cluster_state, is_done)
         return is_done
 
-    def solve(self, arr: GraphArray):
-        arr = arr.copy()
+    def solve(self, arr_in: GraphArray):
+        arr = arr_in.copy()
         state: ProgramState = ProgramState(arr,
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action,
                                            plan_only=True)
+        if len(state.tnode_map) == 0:
+            return arr
+
         num_steps = 0
         while True:
             num_steps += 1
