@@ -21,22 +21,45 @@ from nums.core.array.base import Block
 from nums.core.systems.systems import System
 
 
+class Counter(object):
+
+    def __init__(self):
+        self.n = -1
+
+    def __call__(self):
+        self.n += 1
+        return self.n
+
+    def copy(self):
+        c_copy = Counter()
+        c_copy.n = self.n
+        return c_copy
+
+
 class ClusterState(object):
 
-    def __init__(self, cluster_shape, system: System):
+    def __init__(self, cluster_shape: tuple, system: System, counter: Counter = None):
+        if counter is None:
+            self.counter = Counter()
+        else:
+            self.counter = counter
+        # The grid layout of cluster nodes.
         self.cluster_shape = cluster_shape
+        # The system instance on which we perform operations.
+        # This is exposed for use by nodes only.
+        # It's not used within this class.
         self.system = system
         # 3 matrices: mem, net_in, net_out.
         self.mem_idx, self.net_in_idx, self.net_out_idx = 0, 1, 2
         self.resources: np.ndarray = np.zeros(shape=tuple([3]+list(self.cluster_shape)),
                                               dtype=np.float)
         # Dict from block id to Block.
-        self.blocks = {}
+        self.blocks: [int, Block] = {}
         # Dict from block id to list of node id.
-        self.block_nodes = {}
+        self.block_nodes: [int, int] = {}
 
     def copy(self):
-        new_cluster = ClusterState(self.cluster_shape, self.system)
+        new_cluster = ClusterState(self.cluster_shape, self.system, self.counter.copy())
         # Copy nodes.
         new_cluster.resources = self.resources.copy()
         # Copy blocks.

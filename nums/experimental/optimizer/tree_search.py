@@ -294,14 +294,14 @@ class Plan(object):
         self.force_final_action = force_final_action
         self.plan = []
 
-    def append(self, cluster_state, action, cost, next_cluster_state, is_done):
-        self.plan.append((cluster_state, action, cost, next_cluster_state, is_done))
+    def append(self, cluster_state, tree_node, action, cost, next_cluster_state, is_done):
+        self.plan.append((cluster_state, tree_node, action, cost, next_cluster_state, is_done))
 
     def execute(self, arr: GraphArray):
         state: ProgramState = ProgramState(arr,
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action)
-        for cluster_state, action, cost, next_cluster_state, is_done in self.plan:
+        for cluster_state, tree_node, action, cost, next_cluster_state, is_done in self.plan:
             # TODO (hme): Remove these inline tests once actual tests are added.
             actual_cost = state.commit_action(action)
             assert np.allclose(actual_cost, cost)
@@ -355,11 +355,13 @@ class RandomPlan(object):
         actions = self.sample_actions(state)
         i = self.rs.randint(0, len(actions))
         action = actions[i]
+        tree_node: TreeNode = state.tnode_map[action[0]].node
         cluster_state = state.arr.cluster_state.copy()
         cost = state.commit_action(action)
         next_cluster_state = state.arr.cluster_state.copy()
         is_done = len(state.tnode_map) == 0
-        self.plan.append(cluster_state, action, cost, next_cluster_state, is_done)
+
+        self.plan.append(cluster_state, tree_node, action, cost, next_cluster_state, is_done)
         return is_done
 
     def solve(self, arr: GraphArray):
