@@ -295,10 +295,18 @@ class Plan(object):
         self.plan = []
 
     def copy(self):
-        raise NotImplementedError()
+        p = self.Plan()
+        p.plan = self.plan.copy() # Semi-deep copy; not sure if it copies ProgramState.
+        return p
 
     def append(self, cluster_state, action, cost, next_cluster_state, is_done):
         self.plan.append((cluster_state, action, cost, next_cluster_state, is_done))
+
+    def get_plan_actions(self):
+        actions = []
+        for step in self.plan:
+            actions.append(step[1])
+        return actions
 
     def execute(self, arr_inp: GraphArray):
         arr = arr.copy()
@@ -324,8 +332,10 @@ class Plan(object):
 
 class ExhaustivePlanner(object):
     
-    def __init__(self, max_reduction_pairs, force_final_action):
-        self.max_reduction_pairs = max_reduction_pairs
+    def __init__(self, force_final_action):
+        # To ensure a fully exhaustive search, want to allow reduction nodes
+        # to consider all pairs of incoming vertices. 
+        self.max_reduction_pairs = None
         self.force_final_action = force_final_action
         self.plan = Plan(max_reduction_pairs, force_final_action)
 
@@ -333,7 +343,7 @@ class ExhaustivePlanner(object):
     def make_plan(self, state: ProgramState):
         # Generate + save all possible plans and their associated costs
         all_plans = []
-        make_plan_helper(self, state, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
+        make_plan_helper(self, state, 0, Plan(self.force_final_action), all_plans) 
 
         # Find minimum cost plan 
         min_cost = all_plans[0][1] # cost is the second entry in the tuples
@@ -358,12 +368,13 @@ class ExhaustivePlanner(object):
         # Keep a running sum of the total cost so far.
         for a in actions:
             next_plan = plan.copy()
-            next_state = state.copy()
+            next_state = state.copy() # copying the ProgramState invokes init_frontier,
+                                      # which finds nodes designated as frontier nodes. 
+            cluster_state = next_state.arr.cluster_state.copy()
             step_cost = next_state.commit_action(a)
-            next_cluster_state = state.arr.cluster_state.copy()
             is_done = len(state.tnode_map) == 0
-            next_plan.append(cluster_state, action, cost, next_cluster_state, is_done)
-            make_plan(next_state, cost + step_cost, next_plan)
+            next_plan.append(cluster_state, action, cost, next_state.arr.cluster_state, is_done)
+            self.make_plan_helper(next_state, cost + step_cost, next_plan, all_plans)
 
     def get_frontier_actions(self, state: ProgramState):
         # Get all frontier nodes.
@@ -375,6 +386,18 @@ class ExhaustivePlanner(object):
             actions += state.tnode_map[tnode_id].actions
         return actions       
 
+    def solve(self, arr_in: GraphArray):
+        arr = arr_in.copy()
+        state: ProgramState = ProgramState(arr,
+                                           max_reduction_pairs=self.max_reduction_pairs,
+                                           force_final_action=self.force_final_action,
+                                           plan_only=True)
+        num_steps = 0
+        while True:
+            num_steps += 1
+            is_done = self.step(state)
+            if is_done:
+                break   
 
 class RandomPlan(object):
 
