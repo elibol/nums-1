@@ -33,6 +33,9 @@ class TreeNodeActionPair(object):
         self.node: TreeNode = node
         self.actions: list = actions
 
+    def __repr__(self):
+        return "TNAP(%s, %s)" % (str(self.node), str(self.actions))
+
 
 class ProgramState(object):
 
@@ -100,7 +103,6 @@ class ProgramState(object):
         if actions is None:
             actions = tnode.get_actions(**self.get_action_kwargs)
         self.tnode_map[tnode.tree_node_id] = TreeNodeActionPair(tnode, actions)
-        print("tnode map after adding frontier node:", self.tnode_map)
 
     def copy(self):
         return ProgramState(self.arr.copy(),
@@ -113,11 +115,6 @@ class ProgramState(object):
         entry: TreeNodeActionPair = self.tnode_map[tnode_id]
         old_node: TreeNode = entry.node
         new_node: TreeNode = old_node.execute_on(**kwargs, plan_only=self.plan_only)
-        print("commit_action", action)
-        print(">> entry", entry)
-        print(">> old node", old_node)
-        print(">> new node", new_node)
-
         # The frontier needs to be updated, so remove the current node from frontier.
         del self.tnode_map[tnode_id]
         if old_node.parent is None and old_node is not new_node:
@@ -125,10 +122,6 @@ class ProgramState(object):
             self.update_root(old_node, new_node)
         if isinstance(new_node, Leaf):
             # If it's a leaf node, its parent may now be a frontier node.
-            print("> is a leaf; parent:", new_node.parent)
-            if new_node.parent is not None:
-                print("> parent's children:", new_node.parent.get_children())
-                print("> parent is frontier node:", new_node.parent.is_frontier())
             new_node_parent: TreeNode = new_node.parent
             if new_node_parent is not None and new_node_parent.is_frontier():
                 self.add_frontier_node(new_node_parent)
@@ -389,6 +382,7 @@ class ExhaustivePlanner(object):
                                       # which finds nodes designated as frontier nodes. 
             cluster_state = next_state.arr.cluster_state.copy()
             step_cost = next_state.commit_action(a)
+            is_done = len(next_state.tnode_map) == 0
             next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
             self.make_plan_helper(next_state, cost + step_cost, next_plan, all_plans)
         print("----")
@@ -452,7 +446,6 @@ class RandomPlan(object):
 
     def step(self, state: ProgramState):
         actions = self.sample_actions(state)
-        print("actions", actions)
         i = self.rs.randint(0, len(actions))
         action = actions[i]
         tree_node: TreeNode = state.tnode_map[action[0]].node

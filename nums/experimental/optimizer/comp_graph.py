@@ -480,8 +480,9 @@ class ReductionOp(TreeNode):
             assert (child_copy.tree_node_id is not None
                     and (new_ids or child_copy.tree_node_id == child_id))
             rop.children_dict[child_copy.tree_node_id] = child_copy
-            if self.tree_node_id in self.leafs_dict:
+            if child.tree_node_id in self.leafs_dict:
                 rop.leafs_dict[child_copy.tree_node_id] = child_copy
+        # TODO (hme): How do we properly copy random state?
         return rop
 
     def add_child(self, child: TreeNode):
@@ -524,8 +525,6 @@ class ReductionOp(TreeNode):
         # This is a frontier if all children are computed.
         # This is a stronger constraint than just 2 leafs, but allows
         # for better pairing of operations during action selction.
-        print("Reduction is_frontier: leaves", self.leafs_dict)
-        print("Reduction is_frontier: children", self.children_dict)
         return len(self.leafs_dict) == len(self.children_dict)
 
     def get_frontier(self):

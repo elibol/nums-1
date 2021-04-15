@@ -31,7 +31,7 @@ from nums.core.array.application import ArrayApplication, BlockArray
 from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.cluster_sim import ClusterState
-from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
+from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, UnaryOp, BinaryOp, ReductionOp, Leaf
 from nums.experimental.optimizer.tree_search import RandomTS, RandomPlan, Plan
 import common
 
@@ -58,6 +58,26 @@ def graphs_equal(ga1: GraphArray, ga2: GraphArray):
         n2: TreeNode = nodes2[i]
         assert n1 is not n2
         assert n1.tree_node_id == n2.tree_node_id
+        if n1.parent is None:
+            assert n2.parent is None
+        else:
+            assert n1.parent.tree_node_id == n2.parent.tree_node_id
+        assert type(n1) == type(n2)
+        if type(n1) is Leaf:
+            assert n1.block_id == n2.block_id
+        elif type(n1) is UnaryOp:
+            assert n1.op_name == n2.op_name
+            assert n1.child.tree_node_id == n2.child.tree_node_id
+        elif type(n1) is BinaryOp:
+            assert n1.op_name == n2.op_name
+            assert n1.args == n2.args
+            assert n1.left.tree_node_id == n2.left.tree_node_id
+            assert n1.right.tree_node_id == n2.right.tree_node_id
+        elif type(n1) is ReductionOp:
+            assert n1.op_name == n2.op_name
+            # TODO (hme): How to ensure proper replication of random state?
+            assert set(n1.children_dict.keys()) == set(n2.children_dict.keys())
+            assert set(n1.leafs_dict.keys()) == set(n2.leafs_dict.keys())
 
 
 def tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes, copy_on_op=True) -> GraphArray:
