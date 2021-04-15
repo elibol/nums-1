@@ -524,6 +524,8 @@ class ReductionOp(TreeNode):
         # This is a frontier if all children are computed.
         # This is a stronger constraint than just 2 leafs, but allows
         # for better pairing of operations during action selction.
+        print("Reduction is_frontier: leaves", self.leafs_dict)
+        print("Reduction is_frontier: children", self.children_dict)
         return len(self.leafs_dict) == len(self.children_dict)
 
     def get_frontier(self):
@@ -787,14 +789,6 @@ class GraphArray(object):
             graphs_copy[grid_entry] = old_tree_node.copy(cluster_state=new_cluster,
                                                          new_ids=new_ids)
         return GraphArray(self.grid, new_cluster, graphs_copy)
-
-    def equivalent(self, other: GraphArray):
-        # All tree node IDs are identical
-        # Cluster state is identical
-        if not self.cluster_state.equivalent(other.cluster_state)):
-            return False
-        # Tree structure is identical
-        return True
 
     def to_blocks(self) -> np.ndarray:
         blocks: np.ndarray = np.empty(self.grid.grid_shape, dtype=Block)

@@ -100,6 +100,7 @@ class ProgramState(object):
         if actions is None:
             actions = tnode.get_actions(**self.get_action_kwargs)
         self.tnode_map[tnode.tree_node_id] = TreeNodeActionPair(tnode, actions)
+        print("tnode map after adding frontier node:", self.tnode_map)
 
     def copy(self):
         return ProgramState(self.arr.copy(),
@@ -112,6 +113,11 @@ class ProgramState(object):
         entry: TreeNodeActionPair = self.tnode_map[tnode_id]
         old_node: TreeNode = entry.node
         new_node: TreeNode = old_node.execute_on(**kwargs, plan_only=self.plan_only)
+        print("commit_action", action)
+        print(">> entry", entry)
+        print(">> old node", old_node)
+        print(">> new node", new_node)
+
         # The frontier needs to be updated, so remove the current node from frontier.
         del self.tnode_map[tnode_id]
         if old_node.parent is None and old_node is not new_node:
@@ -119,6 +125,10 @@ class ProgramState(object):
             self.update_root(old_node, new_node)
         if isinstance(new_node, Leaf):
             # If it's a leaf node, its parent may now be a frontier node.
+            print("> is a leaf; parent:", new_node.parent)
+            if new_node.parent is not None:
+                print("> parent's children:", new_node.parent.get_children())
+                print("> parent is frontier node:", new_node.parent.is_frontier())
             new_node_parent: TreeNode = new_node.parent
             if new_node_parent is not None and new_node_parent.is_frontier():
                 self.add_frontier_node(new_node_parent)
@@ -298,7 +308,7 @@ class Plan(object):
         self.plan = []
 
     def copy(self):
-        p = self.Plan()
+        p = Plan(self.max_reduction_pairs, self.force_final_action)
         p.plan = self.plan.copy() # Semi-deep copy; not sure if it copies ProgramState.
         return p
 
@@ -312,9 +322,7 @@ class Plan(object):
         return actions
 
     def execute(self, arr_inp: GraphArray):
-        arr = arr.copy()
-        # Check that deep copy was correct 
-        assert arr_inp.equivalent(arr)
+        arr = arr_inp.copy()
         state: ProgramState = ProgramState(arr,
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action)
@@ -328,30 +336,29 @@ class Plan(object):
             actual_is_done = len(state.tnode_map) == 0
             assert actual_is_done == is_done
 
-        # Ensure that execute doesn't modify cluster state or tree structure
-        assert arr_inp.check_equivalent(arr)
         return state.arr
 
 
 class ExhaustivePlanner(object):
     
-    def __init__(self, force_final_action):
+    def __init__(self, force_final_action=True):
         # To ensure a fully exhaustive search, want to allow reduction nodes
         # to consider all pairs of incoming vertices. 
         self.max_reduction_pairs = None
         self.force_final_action = force_final_action
-        self.plan = Plan(max_reduction_pairs, force_final_action)
+        self.plan = Plan(self.max_reduction_pairs, force_final_action)
 
     # Generate an optimal plan via exhaustive search
     def make_plan(self, state: ProgramState):
         # Generate + save all possible plans and their associated costs
         all_plans = []
-        make_plan_helper(self, state, 0, Plan(self.force_final_action), all_plans) 
-
+        self.make_plan_helper(state, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
         # Find minimum cost plan 
         min_cost = all_plans[0][1] # cost is the second entry in the tuples
         for p in all_plans:
-            if p[1] < min_cost:
+            print("plan actions:", p[0].get_plan_actions())
+            print(">>>>> cost:", p[1])
+            if p[1] <= min_cost:
                 min_cost = p[1]
                 self.plan = p[0]
 
@@ -361,10 +368,16 @@ class ExhaustivePlanner(object):
     def make_plan_helper(self, state: ProgramState, cost, plan: Plan, all_plans):
         # Get all actions possible from current frontier.
         actions = self.get_frontier_actions(state)
+        print("make_plan_helper actions", actions)
+        print("all_plans", all_plans)
+        print("cost", cost)
+        print("current plan", plan.get_plan_actions())
 
         # Base case: if no actions, return plan and cost
         if len(actions) == 0:
+            print("encountered base case")
             all_plans.append((plan, cost))
+            return
 
         # For each action, construct a new ProgramState that takes
         # that action at this step. 
@@ -376,14 +389,14 @@ class ExhaustivePlanner(object):
                                       # which finds nodes designated as frontier nodes. 
             cluster_state = next_state.arr.cluster_state.copy()
             step_cost = next_state.commit_action(a)
-            is_done = len(state.tnode_map) == 0
-            next_plan.append(cluster_state, tree_node, action, cost, next_state.arr.cluster_state, is_done)
+            next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
             self.make_plan_helper(next_state, cost + step_cost, next_plan, all_plans)
+        print("----")
 
     def get_frontier_actions(self, state: ProgramState):
         # Get all frontier nodes.
         tnode_ids = list(state.tnode_map.keys())
-        
+        print("frontier:", tnode_ids)
         # Collect all possible actions on each node.
         actions = []
         for tnode_id in tnode_ids:
@@ -396,12 +409,8 @@ class ExhaustivePlanner(object):
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action,
                                            plan_only=True)
-        num_steps = 0
-        while True:
-            num_steps += 1
-            is_done = self.step(state)
-            if is_done:
-                break   
+        self.make_plan(state)
+
 
 class RandomPlan(object):
 
@@ -443,6 +452,7 @@ class RandomPlan(object):
 
     def step(self, state: ProgramState):
         actions = self.sample_actions(state)
+        print("actions", actions)
         i = self.rs.randint(0, len(actions))
         action = actions[i]
         tree_node: TreeNode = state.tnode_map[action[0]].node

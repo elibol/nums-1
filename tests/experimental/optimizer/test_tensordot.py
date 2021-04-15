@@ -32,7 +32,7 @@ from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.cluster_sim import ClusterState
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
-from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS
+from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, RandomPlan, ExhaustivePlanner
 import common
 
 
@@ -49,18 +49,38 @@ def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
     global random_state
     print("*"*50)
     print("op grid shape", tensordot_ga.grid.grid_shape)
-    result_ga: GraphArray = RandomTS(
-        seed=common.rs,
-        max_samples_per_step=1,
-        max_reduction_pairs=1,
-        force_final_action=True).solve(tensordot_ga)
+    print("input", tensordot_ga)
+    print("full tree", traverse(tensordot_ga.graphs[0][0]))
 
+#    result_ga: GraphArray = RandomTS(
+#        seed=common.rs,
+#        max_samples_per_step=1,
+#        max_reduction_pairs=1,
+#        force_final_action=True).solve(tensordot_ga)
+
+#    planner = RandomPlan()
+    planner = ExhaustivePlanner()
+    planner.solve(tensordot_ga)
+    result_ga = planner.plan.execute(tensordot_ga)
+    print("plan actions", planner.plan.get_plan_actions())
+    print(result_ga)
     # print("mem", resources[0] / np.sum(resources[0]))
     print("mem", cluster_state.resources[0])
     print("net_in", cluster_state.resources[1])
     print("net_out", cluster_state.resources[2])
     print("*"*50)
     return BlockArray(result_ga.grid, system, result_ga.to_blocks())
+
+
+def traverse(root: TreeNode):
+    queue = [root]
+    traversal = []
+    while len(queue) > 0:
+        current = queue.pop(0)
+        traversal.append(current)
+        for i in current.get_children():
+            queue.append(i)
+    return traversal
 
 
 def test_matvec(app_inst: ArrayApplication):
@@ -202,8 +222,8 @@ if __name__ == "__main__":
     from tests import conftest
 
     app_inst = conftest.get_app("ray-cyclic")
-    test_matvec(app_inst)
+#    test_matvec(app_inst)
     test_matmat(app_inst)
-    test_big_matmat(app_inst)
-    test_load_sqr()
-    test_load_single_block_rhs()
+#    test_big_matmat(app_inst)
+#    test_load_sqr()
+#    test_load_single_block_rhs()
