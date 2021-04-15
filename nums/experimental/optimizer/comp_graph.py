@@ -14,7 +14,6 @@
 # limitations under the License.
 
 
-
 import itertools
 
 import numpy as np
@@ -33,39 +32,24 @@ def subsample(total_items, max_items, rs: np.random.RandomState):
     return perms[:max_items]
 
 
-class Counter(object):
-
-    def __init__(self):
-        self.n = -1
-
-    def __call__(self):
-        self.n += 1
-        return self.n
-
-    def copy(self):
-        c_copy = Counter()
-        c_copy.n = self.n
-        return c_copy
-
-
 class TreeNode(object):
 
-    new_id = Counter()
-
-    def __init__(self, tree_node_id=None):
+    def __init__(self, cluster_state: ClusterState, tree_node_id=None):
         # A deterministic identifier that's preserved across copies.
         # label each node as grid_entry, i, where i \in 0, ..., num nodes,
         # incremented top-down and left-to-right.
-        # A collapsed node is a tuple of its id and the child nodes it comprised.
-        self.tree_node_id = self.new_id() if tree_node_id is None else tree_node_id
+        self.cluster_state: ClusterState = cluster_state
+        self.tree_node_id = self.cluster_state.counter() if tree_node_id is None else tree_node_id
         self.parent: TreeNode = None
-        self.cluster_state: ClusterState = None
         self.copy_on_op = True
 
     def get_root(self):
         if self.parent is None:
             return self
         return self.parent.get_root()
+
+    def get_children(self):
+        raise NotImplementedError()
 
     def num_nodes(self):
         raise NotImplementedError()
@@ -102,8 +86,7 @@ class TreeNode(object):
 
     def make_bop(self, op_name, other, args=None):
         assert isinstance(other, TreeNode)
-        bop: BinaryOp = BinaryOp()
-        bop.cluster_state = self.cluster_state
+        bop: BinaryOp = BinaryOp(self.cluster_state)
         bop.op_name = op_name
         bop.args = args
         assert self.copy_on_op == other.copy_on_op
@@ -142,23 +125,25 @@ class TreeNode(object):
 
 class Leaf(TreeNode):
 
-    def __init__(self, tree_node_id=None):
+    def __init__(self, cluster_state: ClusterState, tree_node_id=None):
         # The leaf abstraction enables the same block to be a part of multiple computations,
         # evolving its state across all leafs holding a reference to the block.
-        super().__init__(tree_node_id)
+        super().__init__(cluster_state, tree_node_id)
         self.block_id = None
 
+    def get_children(self):
+        return []
+
     def __repr__(self):
-        return str(self.block_id)
+        return "Leaf(id=%s, bid=%s)" % (str(self.tree_node_id), str(self.block_id))
 
     def num_nodes(self):
         return 1
 
     def copy(self, cluster_state, parent=None, new_ids=False):
-        leaf: Leaf = Leaf(None if new_ids else self.tree_node_id)
+        leaf: Leaf = Leaf(cluster_state, None if new_ids else self.tree_node_id)
         assert (leaf.tree_node_id is not None
                 and (new_ids or leaf.tree_node_id == self.tree_node_id))
-        leaf.cluster_state = cluster_state
         leaf.parent = parent
         leaf.block_id = self.block_id
         leaf.copy_on_op = self.copy_on_op
@@ -182,16 +167,18 @@ class Leaf(TreeNode):
 
 class UnaryOp(TreeNode):
 
-    def __init__(self, tree_node_id=None):
-        super().__init__(tree_node_id)
+    def __init__(self, cluster_state: ClusterState, tree_node_id=None):
+        super().__init__(cluster_state, tree_node_id)
         self.child: TreeNode = None
         self.op_name = None
 
+    def get_children(self):
+        return [self.child]
+
     def copy(self, cluster_state, parent=None, new_ids=False):
-        uop: UnaryOp = UnaryOp(None if new_ids else self.tree_node_id)
+        uop: UnaryOp = UnaryOp(cluster_state, None if new_ids else self.tree_node_id)
         assert (uop.tree_node_id is not None
                 and (new_ids or uop.tree_node_id == self.tree_node_id))
-        uop.cluster_state = cluster_state
         uop.parent = parent
         uop.child = self.child.copy(cluster_state, parent=uop, new_ids=new_ids)
         uop.op_name = self.op_name
@@ -246,7 +233,6 @@ class UnaryOp(TreeNode):
         assert isinstance(self.child, Leaf)
         result = self._collapse(node_id, plan_only)
         new_leaf: Leaf = result[0]
-        new_leaf.cluster_state = self.cluster_state
         new_block: Block = result[1]
         self.cluster_state.commit_uop(self._mem_cost(),
                                       self.child.block_id,
@@ -268,7 +254,7 @@ class UnaryOp(TreeNode):
             block: Block = block.transpose(plan_only=plan_only)
         else:
             block: Block = block.ufunc(op_name, options=options, plan_only=plan_only)
-        leaf: Leaf = Leaf()
+        leaf: Leaf = Leaf(self.cluster_state)
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op
         return leaf, block
@@ -288,8 +274,8 @@ class UnaryOp(TreeNode):
 
 class BinaryOp(TreeNode):
 
-    def __init__(self, tree_node_id=None):
-        super().__init__(tree_node_id)
+    def __init__(self, cluster_state: ClusterState, tree_node_id=None):
+        super().__init__(cluster_state, tree_node_id)
         self.left: TreeNode = None
         self.right: TreeNode = None
         self.op_name = None
@@ -304,16 +290,19 @@ class BinaryOp(TreeNode):
             "matmul": "@",
             "tensordot": "@"
         }[self.op_name]
-        return "(%s %s %s)" % (str(self.left), bop_symbol, str(self.right))
+        return "BOp(id=%s, op=%s%s%s)" % (self.tree_node_id, str(self.left.tree_node_id),
+                                             bop_symbol, str(self.right.tree_node_id))
+
+    def get_children(self):
+        return [self.left, self.right]
 
     def num_nodes(self):
         return self.left.num_nodes() + self.right.num_nodes() + 1
 
     def copy(self, cluster_state, parent=None, new_ids=False):
-        bop = BinaryOp(None if new_ids else self.tree_node_id)
+        bop = BinaryOp(cluster_state, None if new_ids else self.tree_node_id)
         assert (bop.tree_node_id is not None
                 and (new_ids or bop.tree_node_id == self.tree_node_id))
-        bop.cluster_state = cluster_state
         bop.parent = parent
         bop.op_name = self.op_name
         bop.args = None if self.args is None else self.args.copy()
@@ -384,7 +373,6 @@ class BinaryOp(TreeNode):
         assert isinstance(self.left, Leaf) and isinstance(self.right, Leaf)
         result = self._collapse(node_id, plan_only)
         new_leaf: Leaf = result[0]
-        new_leaf.cluster_state = self.cluster_state
         new_block: Block = result[1]
         # This updates load on nodes and channels.
         # This also updates block states to indicate that they now reside on the provided nodes.
@@ -419,7 +407,7 @@ class BinaryOp(TreeNode):
         options: dict = self.cluster_state.system.get_options(node_id,
                                                               self.cluster_state.cluster_shape)
         block: Block = lblock.bop(op_name, rblock, args=args, options=options, plan_only=plan_only)
-        leaf: Leaf = Leaf()
+        leaf: Leaf = Leaf(self.cluster_state)
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op
         return leaf, block
@@ -456,8 +444,8 @@ class BinaryOp(TreeNode):
 
 class ReductionOp(TreeNode):
 
-    def __init__(self, tree_node_id=None, seed=1337):
-        super().__init__(tree_node_id)
+    def __init__(self, cluster_state: ClusterState, tree_node_id=None, seed=1337):
+        super().__init__(cluster_state, tree_node_id)
         self.op_name = None
         # For sampling pairs of leafs in get_actions.
         self.rs = np.random.RandomState(seed)
@@ -465,7 +453,12 @@ class ReductionOp(TreeNode):
         self.leafs_dict: dict = {}
 
     def __repr__(self):
-        return self.op_name+"(%d)" % len(self.children_dict)
+        return "Reduc(id=%s, op=%s, in=%d)" % (str(self.tree_node_id),
+                                               self.op_name,
+                                               len(self.children_dict))
+
+    def get_children(self):
+        return [self.children_dict[key] for key in sorted(self.children_dict.keys())]
 
     def num_nodes(self):
         r = 1
@@ -474,10 +467,9 @@ class ReductionOp(TreeNode):
         return r
 
     def copy(self, cluster_state, parent=None, new_ids=False):
-        rop: ReductionOp = ReductionOp(None if new_ids else self.tree_node_id)
+        rop: ReductionOp = ReductionOp(cluster_state, None if new_ids else self.tree_node_id)
         assert (rop.tree_node_id is not None
                 and (new_ids or rop.tree_node_id == self.tree_node_id))
-        rop.cluster_state = cluster_state
         rop.parent = parent
         rop.op_name = self.op_name
         rop.copy_on_op = self.copy_on_op
@@ -647,7 +639,6 @@ class ReductionOp(TreeNode):
         assert isinstance(left, Leaf) and isinstance(right, Leaf)
         result = self._collapse(node_id, left, right, plan_only=plan_only)
         new_leaf: Leaf = result[0]
-        new_leaf.cluster_state = self.cluster_state
         new_block: Block = result[1]
         # This updates load on nodes and channels.
         # This also updates block states to indicate that they now reside on the provided nodes.
@@ -672,8 +663,7 @@ class ReductionOp(TreeNode):
             # We need to perform further reductions before this node can be converted to a BinaryOp.
             return self
         elif len(self.children_dict) == 2:
-            bop: BinaryOp = BinaryOp()
-            bop.cluster_state = self.cluster_state
+            bop: BinaryOp = BinaryOp(self.cluster_state)
             bop.op_name = self.op_name
             bop.copy_on_op = self.copy_on_op
             # These need not be leaf nodes.
@@ -714,7 +704,7 @@ class ReductionOp(TreeNode):
         options: dict = self.cluster_state.system.get_options(node_id,
                                                               self.cluster_state.cluster_shape)
         block: Block = lblock.bop(op_name, rblock, args=args, options=options, plan_only=plan_only)
-        leaf: Leaf = Leaf()
+        leaf: Leaf = Leaf(self.cluster_state)
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op
         return leaf, block
@@ -754,8 +744,7 @@ class GraphArray(object):
             cluster_state.init_mem_load(node_id, block.id)
 
             # Create the leaf representing this block for future computations.
-            leaf: Leaf = Leaf()
-            leaf.cluster_state = cluster_state
+            leaf: Leaf = Leaf(cluster_state)
             leaf.block_id = block.id
             leaf.copy_on_op = copy_on_op
             graphs[grid_entry] = leaf
@@ -820,17 +809,6 @@ class GraphArray(object):
             return other
         return self.from_ba(other, self.cluster_state)
 
-    def _tree_reduce(self, op, tree_nodes):
-        # Need this now.
-        # Make sure consturction is deterministic.
-        add_reduce_op = ReductionOp()
-        add_reduce_op.cluster_state = self.cluster_state
-        add_reduce_op.op_name = "add"
-        add_reduce_op.copy_on_op = self.copy_on_op
-        # dot_node.parent = add_reduce_op
-        # add_reduce_op.add_child(dot_node)
-        # result_graphs[grid_entry] = add_reduce_op
-
     def tensordot(self, other, axes=2):
         other = self.other_to_ba(other)
         # TODO: Reuse BlockArrayBase tensordot operator.
@@ -863,8 +841,7 @@ class GraphArray(object):
                     dot_node: TreeNode = self_node.tensordot(other_node, axes=axes)
                     result_graphs[grid_entry] = dot_node
                 else:
-                    add_reduce_op = ReductionOp()
-                    add_reduce_op.cluster_state = self.cluster_state
+                    add_reduce_op = ReductionOp(self.cluster_state)
                     add_reduce_op.op_name = "add"
                     add_reduce_op.copy_on_op = self.copy_on_op
                     for k in sum_dims:
@@ -980,8 +957,7 @@ class GraphArray(object):
                           copy_on_op=self.copy_on_op)
 
     def _add_uop(self, op_name, grid_entry, old_arr, new_arr):
-        uop: UnaryOp = UnaryOp()
-        uop.cluster_state = self.cluster_state
+        uop: UnaryOp = UnaryOp(self.cluster_state)
         uop.copy_on_op = self.copy_on_op
         uop.op_name = op_name
         # Do this in case old_arr == new_arr.
@@ -999,3 +975,22 @@ class GraphArray(object):
             uop.child = old_root
             old_root.parent = uop
         new_arr[grid_entry] = uop
+
+    def ordered_node_list(self, root: TreeNode):
+        result = []
+        q = [root]
+        while len(q) > 0:
+            node: TreeNode = q.pop(0)
+            q += node.get_children()
+            result.append(node)
+        return result
+
+    def iterator(self):
+        # Yields a breadth first ordered list for each entry.
+        for grid_entry in self.grid.get_entry_iterator():
+            root: TreeNode = self.graphs[grid_entry]
+            q = [root]
+            while len(q) > 0:
+                node: TreeNode = q.pop(0)
+                q += node.get_children()
+                yield node

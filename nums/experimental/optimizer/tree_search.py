@@ -102,7 +102,10 @@ class ProgramState(object):
         self.tnode_map[tnode.tree_node_id] = TreeNodeActionPair(tnode, actions)
 
     def copy(self):
-        return ProgramState(self.arr.copy())
+        return ProgramState(self.arr.copy(),
+                            **self.get_action_kwargs,
+                            force_final_action=self.force_final_action,
+                            plan_only=self.plan_only)
 
     def commit_action(self, action):
         tnode_id, kwargs = action
@@ -299,8 +302,8 @@ class Plan(object):
         p.plan = self.plan.copy() # Semi-deep copy; not sure if it copies ProgramState.
         return p
 
-    def append(self, cluster_state, action, cost, next_cluster_state, is_done):
-        self.plan.append((cluster_state, action, cost, next_cluster_state, is_done))
+    def append(self, cluster_state, tree_node, action, cost, next_cluster_state, is_done):
+        self.plan.append((cluster_state, tree_node, action, cost, next_cluster_state, is_done))
 
     def get_plan_actions(self):
         actions = []
@@ -315,7 +318,7 @@ class Plan(object):
         state: ProgramState = ProgramState(arr,
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action)
-        for cluster_state, action, cost, next_cluster_state, is_done in self.plan:
+        for cluster_state, tree_node, action, cost, next_cluster_state, is_done in self.plan:
             # TODO (hme): Remove these inline tests once actual tests are added.
             actual_cost = state.commit_action(action)
             assert np.allclose(actual_cost, cost)
@@ -367,13 +370,14 @@ class ExhaustivePlanner(object):
         # that action at this step. 
         # Keep a running sum of the total cost so far.
         for a in actions:
+            tree_node: TreeNode = state.tnode_map[a[0]].node
             next_plan = plan.copy()
             next_state = state.copy() # copying the ProgramState invokes init_frontier,
                                       # which finds nodes designated as frontier nodes. 
             cluster_state = next_state.arr.cluster_state.copy()
             step_cost = next_state.commit_action(a)
             is_done = len(state.tnode_map) == 0
-            next_plan.append(cluster_state, action, cost, next_state.arr.cluster_state, is_done)
+            next_plan.append(cluster_state, tree_node, action, cost, next_state.arr.cluster_state, is_done)
             self.make_plan_helper(next_state, cost + step_cost, next_plan, all_plans)
 
     def get_frontier_actions(self, state: ProgramState):
@@ -441,19 +445,24 @@ class RandomPlan(object):
         actions = self.sample_actions(state)
         i = self.rs.randint(0, len(actions))
         action = actions[i]
+        tree_node: TreeNode = state.tnode_map[action[0]].node
         cluster_state = state.arr.cluster_state.copy()
         cost = state.commit_action(action)
         next_cluster_state = state.arr.cluster_state.copy()
         is_done = len(state.tnode_map) == 0
-        self.plan.append(cluster_state, action, cost, next_cluster_state, is_done)
+
+        self.plan.append(cluster_state, tree_node, action, cost, next_cluster_state, is_done)
         return is_done
 
-    def solve(self, arr: GraphArray):
-        arr = arr.copy()
+    def solve(self, arr_in: GraphArray):
+        arr = arr_in.copy()
         state: ProgramState = ProgramState(arr,
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action,
                                            plan_only=True)
+        if len(state.tnode_map) == 0:
+            return arr
+
         num_steps = 0
         while True:
             num_steps += 1
