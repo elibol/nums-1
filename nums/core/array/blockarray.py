@@ -726,6 +726,13 @@ class BlockArray(BlockArrayBase):
             result.blocks[grid_entry] = self.blocks[grid_entry].astype(dtype)
         return result
 
+    def flattened_oids(self):
+        oids = []
+        for grid_entry in self.grid.get_entry_iterator():
+            oid = self.blocks[grid_entry].oid
+            oids.append(oid)
+        return oids
+
 
 class Reshape(object):
 

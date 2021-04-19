@@ -94,9 +94,6 @@ class LBFGS(object):
 
     def execute(self, X, y, theta):
 
-        def f(theta_prime):
-            return objective(self.app, y, forward(self.app, X, theta_prime))
-
         if self.k != 0:
             raise Exception("Unexpected state.")
 
