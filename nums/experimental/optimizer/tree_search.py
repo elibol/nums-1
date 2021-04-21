@@ -118,18 +118,25 @@ class ProgramState(object):
         # The frontier needs to be updated, so remove the current node from frontier.
         del self.tnode_map[tnode_id]
         if old_node.parent is None and old_node is not new_node:
+#            print("We operated on a root node:", old_node, new_node)
             # We operated on a root node, so update the array.
             self.update_root(old_node, new_node)
         if isinstance(new_node, Leaf):
+#            print("New node is a leaf:", old_node, new_node)
             # If it's a leaf node, its parent may now be a frontier node.
             new_node_parent: TreeNode = new_node.parent
+#            if new_node_parent is not None:
+#                print(">>>> has a parent:", new_node_parent)
             if new_node_parent is not None and new_node_parent.is_frontier():
+#                print(">>>> parent is frontier node")
                 self.add_frontier_node(new_node_parent)
         else:
             # There's still work that needs to be done to compute this node.
             # Add the returned node to the frontier.
             # Either a BinaryOp or ReductionOp.
+#            print("Still have work to compute node:", old_node, new_node)
             if new_node.is_frontier():
+#                print(">>>> new node is frontier")
                 self.add_frontier_node(new_node)
         # That's it. This program state is now updated.
         return self.objective(self.arr.cluster_state.resources)
@@ -299,6 +306,7 @@ class Plan(object):
         self.max_reduction_pairs = max_reduction_pairs
         self.force_final_action = force_final_action
         self.plan = []
+        self.cost = 0
 
     def copy(self):
         p = Plan(self.max_reduction_pairs, self.force_final_action)
@@ -313,6 +321,16 @@ class Plan(object):
         for step in self.plan:
             actions.append(step[1])
         return actions
+
+    # Return cluster state at final step in the plan.
+    def get_cluster_state(self):
+        return self.plan[-1][0]
+
+    def get_next_cluster_state(self):
+        return self.plan[-1][4]
+
+    def get_cost(self):
+        return self.cost
 
     def execute(self, arr_inp: GraphArray):
         arr = arr_inp.copy()
@@ -351,24 +369,34 @@ class ExhaustivePlanner(object):
         for p in all_plans:
             print("plan actions:", p[0].get_plan_actions())
             print(">>>>> cost:", p[1])
+            cs = p[0].get_cluster_state()
+            print(">>>>> memory:", cs.resources[0])
+            print(">>>>> net_in:", cs.resources[1])
+            print(">>>>> net_out:", cs.resources[2])
             if p[1] <= min_cost:
+                print(">>>>> PICKED PLAN")
                 min_cost = p[1]
                 self.plan = p[0]
+                self.plan.cost = p[1]
+        print("Total plans: ", len(all_plans))
 
     # Helper to make_plan: recursively generates all possible plans while tracking
     # cumulative cost.
     # all_plans: array of (Plan, int cost)
     def make_plan_helper(self, state: ProgramState, cost, plan: Plan, all_plans):
+        # hack for debugging
+#        if len(all_plans) > 0:
+#            return
+
         # Get all actions possible from current frontier.
         actions = self.get_frontier_actions(state)
-        print("make_plan_helper actions", actions)
-        print("all_plans", all_plans)
-        print("cost", cost)
-        print("current plan", plan.get_plan_actions())
+#        print("make_plan_helper actions", actions)
+#        print("cost", cost)
+#        print("current plan", plan.get_plan_actions())
 
         # Base case: if no actions, return plan and cost
         if len(actions) == 0:
-            print("encountered base case")
+#            print("encountered base case")
             all_plans.append((plan, cost))
             return
 
@@ -376,6 +404,7 @@ class ExhaustivePlanner(object):
         # that action at this step. 
         # Keep a running sum of the total cost so far.
         for a in actions:
+#            print(a)
             tree_node: TreeNode = state.tnode_map[a[0]].node
             next_plan = plan.copy()
             next_state = state.copy() # copying the ProgramState invokes init_frontier,
@@ -385,7 +414,7 @@ class ExhaustivePlanner(object):
             is_done = len(next_state.tnode_map) == 0
             next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
             self.make_plan_helper(next_state, cost + step_cost, next_plan, all_plans)
-        print("----")
+#        print("----")
 
     def get_frontier_actions(self, state: ProgramState):
         # Get all frontier nodes.
@@ -395,6 +424,7 @@ class ExhaustivePlanner(object):
         actions = []
         for tnode_id in tnode_ids:
             actions += state.tnode_map[tnode_id].actions
+        print("actions: (total)", len(actions), actions)
         return actions       
 
     def solve(self, arr_in: GraphArray):

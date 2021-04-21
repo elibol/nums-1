@@ -32,7 +32,7 @@ from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.cluster_sim import ClusterState
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
-from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, RandomPlan, ExhaustivePlanner
+from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, ExhaustivePlanner, Plan
 import common
 
 
@@ -47,40 +47,33 @@ def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=copy_on_op)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
     global random_state
-    print("*"*50)
     print("op grid shape", tensordot_ga.grid.grid_shape)
-    print("input", tensordot_ga)
-    print("full tree", traverse(tensordot_ga.graphs[0][0]))
 
-#    result_ga: GraphArray = RandomTS(
-#        seed=common.rs,
-#        max_samples_per_step=1,
-#        max_reduction_pairs=1,
-#        force_final_action=True).solve(tensordot_ga)
-
-#    planner = RandomPlan()
-    planner = ExhaustivePlanner()
+    planner: ExhaustivePlanner = ExhaustivePlanner()
     planner.solve(tensordot_ga)
-    result_ga = planner.plan.execute(tensordot_ga)
-    print("plan actions", planner.plan.get_plan_actions())
-    print(result_ga)
-    # print("mem", resources[0] / np.sum(resources[0]))
+    plan: Plan = planner.plan
+    result_ga: GraphArray = plan.execute(tensordot_ga)
+
     print("mem", cluster_state.resources[0])
     print("net_in", cluster_state.resources[1])
     print("net_out", cluster_state.resources[2])
-    print("*"*50)
     return BlockArray(result_ga.grid, system, result_ga.to_blocks())
 
 
-def traverse(root: TreeNode):
-    queue = [root]
-    traversal = []
-    while len(queue) > 0:
-        current = queue.pop(0)
-        traversal.append(current)
-        for i in current.get_children():
-            queue.append(i)
-    return traversal
+def traverse(ga: GraphArray):
+    visited = set()
+    root = ga.graphs[0][0]
+    print("graphs type", type(ga.graphs), type(ga.graphs[0]), type(ga.graphs[0][0]))
+    remaining = [root]
+    while len(remaining) > 0:
+        current = remaining.pop(0)
+        print(current)
+        print(type(current))
+        visited.add(str(current.tree_node_id))
+        for c in current.get_children():
+            if c in visited:
+                continue
+            remaining.append(c)
 
 
 def test_matvec(app_inst: ArrayApplication):
@@ -126,8 +119,9 @@ def test_big_matmat(app_inst: ArrayApplication):
 
 
 def test_load_sqr():
-    app_inst = common.mock_cluster((10, 1))
-    num_blocks = 100
+    num_nodes = 5
+    app_inst = common.mock_cluster((num_nodes, 1))
+    num_blocks = 5
     X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
     Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
@@ -138,11 +132,12 @@ def test_load_sqr():
     lhs, rhs, axes = X.T, Y, 1
     system: System = lhs.system
     if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
+        print("ray system, block cyclic")
         cluster_state: ClusterState = ClusterState(system.scheduler.cluster_shape, system)
     else:
         cluster_state: ClusterState = ClusterState((1,), system)
-    lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state)
-    rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state)
+    lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state, copy_on_op=True)
+    rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=True)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
 
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
@@ -151,16 +146,23 @@ def test_load_sqr():
     assert mem_diff == net_in_diff == net_out_diff == 0
     # Block-cyclic distribution of 100 blocks of size 25 over 10 nodes == 10*25 == 250
     # We have 2 such matrices, so expect initial memory to be 500.
-    assert max(cluster_state.resources[0]) == 500
+    print(cluster_state.resources)
+    assert max(cluster_state.resources[0]) == (num_blocks/num_nodes)*25*2
     assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
-    result_ga: GraphArray = RandomTS(
-        seed=np.random.RandomState(1337),
-        max_samples_per_step=1,
-        max_reduction_pairs=1,
-        force_final_action=True).solve(tensordot_ga)
-    print("memory", cluster_state.resources[0])
-    print("net_in", cluster_state.resources[1])
-    print("net_out", cluster_state.resources[2])
+
+    print("Input GA: ", tensordot_ga)
+    traverse(tensordot_ga)
+    planner: ExhaustivePlanner = ExhaustivePlanner()
+    planner.solve(tensordot_ga)
+    plan: Plan = planner.plan
+    print("Executing plan: ", plan.get_plan_actions())
+    print(">>> cost:", plan.get_cost())
+    result_ga: GraphArray = plan.execute(tensordot_ga)
+
+    rs = plan.get_cluster_state().resources
+    print("memory", rs[0])
+    print("net_in", rs[1])
+    print("net_out", rs[2])
 
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
     net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
@@ -223,7 +225,7 @@ if __name__ == "__main__":
 
     app_inst = conftest.get_app("ray-cyclic")
 #    test_matvec(app_inst)
-    test_matmat(app_inst)
+#    test_matmat(app_inst)
 #    test_big_matmat(app_inst)
-#    test_load_sqr()
+    test_load_sqr()
 #    test_load_single_block_rhs()
