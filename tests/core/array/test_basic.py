@@ -19,6 +19,7 @@ import numpy as np
 from nums.core.storage.storage import BimodalGaussian, ArrayGrid
 from nums.core.array.application import ArrayApplication
 from nums.core.array.blockarray import BlockArray
+from nums.core import settings
 
 # pylint: disable=wrong-import-order
 import common
@@ -68,7 +69,7 @@ def test_split(app_inst: ArrayApplication):
     # TODO (hme): Implement a split leveraging block_shape param in reshape op.
     x = app_inst.array(np.array([1.0, 2.0, 3.0, 4.0]), block_shape=(4,))
     syskwargs = x.blocks[0].syskwargs()
-    syskwargs["options"] = {"num_returns": 2}
+    syskwargs["options"] = {settings.ray_num_returns_str: 2}
     res1, res2 = x.system.split(x.blocks[0].oid,
                                 2,
                                 axis=0,
