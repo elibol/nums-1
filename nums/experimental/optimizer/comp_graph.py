@@ -851,6 +851,25 @@ class GraphArray(object):
         return GraphArray(result_grid, self.cluster_state, result_graphs,
                           copy_on_op=self.copy_on_op)
 
+    def sum(self, axis=None):
+        assert axis is None, "Only complete reductions are currently supported."
+        # Node that this does not sum within each block.
+        # To do this, we need a new node type.
+        result_grid = ArrayGrid(shape=(),
+                                block_shape=(),
+                                dtype=self.dtype.__name__)
+        result_graphs = np.empty(shape=result_grid.grid_shape, dtype=np.object)
+        add_reduce_op = ReductionOp(self.cluster_state)
+        add_reduce_op.op_name = "add"
+        add_reduce_op.copy_on_op = self.copy_on_op
+        for grid_entry in self.grid.get_entry_iterator():
+            node: TreeNode = self.graphs[grid_entry]
+            node.parent = add_reduce_op
+            add_reduce_op.add_child(node)
+        result_graphs[()] = add_reduce_op
+        return GraphArray(result_grid, self.cluster_state, result_graphs,
+                          copy_on_op=self.copy_on_op)
+
     def __matmul__(self, other):
         return self.tensordot(other, axes=1)
 
