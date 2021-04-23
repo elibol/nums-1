@@ -44,6 +44,8 @@ class Block(object):
             global block_id_counter
             block_id_counter += 1
             self.id = block_id_counter
+        # Set if options are used to compute this block.
+        self.options = None
 
     def __repr__(self):
         return "Block(" + str(self.oid) + ")"
@@ -130,6 +132,7 @@ class Block(object):
                                                  "grid_shape": block.grid_shape
                                              })
         else:
+            block.options = options
             block.oid = self._system.call_with_options("map_uop",
                                                        [op_name, self.oid,
                                                         args,
@@ -274,8 +277,6 @@ class Block(object):
             block.oid = self._system.bop(op,
                                          self.oid,
                                          other.oid,
-                                         self.shape,
-                                         other.shape,
                                          self.transposed,
                                          other.transposed,
                                          axes=args.get("axes"),
@@ -284,13 +285,12 @@ class Block(object):
                                              "grid_shape": block.grid_shape
                                          })
         else:
+            block.options = options
             block.oid = self._system.call_with_options("bop",
                                                        [
                                                            op,
                                                            self.oid,
                                                            other.oid,
-                                                           self.shape,
-                                                           other.shape,
                                                            self.transposed,
                                                            other.transposed
                                                        ], {
@@ -401,18 +401,21 @@ class BlockArrayBase(object):
     def __repr__(self):
         return "BlockArray(" + str(self.blocks) + ")"
 
-    def get(self):
-        result = np.zeros(shape=self.grid.shape, dtype=self.grid.dtype)
-        block_shape = np.array(self.grid.block_shape, dtype=np.int)
-        blocks = self.system.get([self.blocks[grid_entry].oid
-                                  for grid_entry in self.grid.get_entry_iterator()])
+    def get(self) -> np.ndarray:
+        result: np.ndarray = np.zeros(shape=self.grid.shape, dtype=self.grid.dtype)
+        block_shape: np.ndarray = np.array(self.grid.block_shape, dtype=np.int)
+        arrays: list = self.system.get([self.blocks[grid_entry].oid
+                                        for grid_entry in self.grid.get_entry_iterator()])
         for block_index, grid_entry in enumerate(self.grid.get_entry_iterator()):
             start = block_shape * grid_entry
             entry_shape = np.array(self.grid.get_block_shape(grid_entry), dtype=np.int)
             end = start + entry_shape
             slices = tuple(map(lambda item: slice(*item), zip(*(start, end))))
-            block = self.blocks[grid_entry]
-            result[slices] = blocks[block_index].reshape(block.shape)
+            block: Block = self.blocks[grid_entry]
+            arr: np.ndarray = arrays[block_index]
+            if block.transposed:
+                arr = arr.T
+            result[slices] = arr.reshape(block.shape)
         return result
 
     def broadcast_to(self, shape):
