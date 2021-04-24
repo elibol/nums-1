@@ -802,6 +802,16 @@ class GraphArray(object):
             return other
         return self.from_ba(other, self.cluster_state)
 
+    def _reduce(self, op_name, tree_nodes):
+        q = tree_nodes
+        while len(q) > 1:
+            a: TreeNode = q.pop(0)
+            b: TreeNode = q.pop(0)
+            c: TreeNode = a.make_bop(op_name, b)
+            q.append(c)
+        r = q.pop(0)
+        return r
+
     def tensordot(self, other, axes=2):
         other = self.other_to_ba(other)
         # TODO: Reuse BlockArrayBase tensordot operator.
@@ -834,9 +844,7 @@ class GraphArray(object):
                     dot_node: TreeNode = self_node.tensordot(other_node, axes=axes)
                     result_graphs[grid_entry] = dot_node
                 else:
-                    add_reduce_op = ReductionOp(self.cluster_state)
-                    add_reduce_op.op_name = "add"
-                    add_reduce_op.copy_on_op = self.copy_on_op
+                    tree_nodes = []
                     for k in sum_dims:
                         self_node: TreeNode = self.graphs[tuple(i + k)]
                         other_node: TreeNode = other.graphs[tuple(k + j)]
@@ -845,28 +853,48 @@ class GraphArray(object):
                         # Not needed for other ops; make_bop takes care of it.
                         # We don't need to copy the node here since the local
                         # tree structure here is never exposed.
-                        dot_node.parent = add_reduce_op
-                        add_reduce_op.add_child(dot_node)
-                    result_graphs[grid_entry] = add_reduce_op
+                        tree_nodes.append(dot_node)
+                    result_graphs[grid_entry] = self._reduce("add", tree_nodes)
         return GraphArray(result_grid, self.cluster_state, result_graphs,
                           copy_on_op=self.copy_on_op)
 
-    def sum(self, axis=None):
+    def block_sum(self, axis=None, tree_reduce=False):
         assert axis is None, "Only complete reductions are currently supported."
-        # Node that this does not sum within each block.
-        # To do this, we need a new node type.
-        result_grid = ArrayGrid(shape=(),
-                                block_shape=(),
+        # # Note that this does not sum within each block.
+        # # To do this, we need a new node type.
+        if tree_reduce:
+            tree_nodes = []
+            shape = None
+            for grid_entry in self.grid.get_entry_iterator():
+                node: TreeNode = self.graphs[grid_entry]
+                tree_nodes.append(node)
+                if shape is None:
+                    shape = node.shape()
+                else:
+                    assert shape == node.shape(), "shape mismatch for block_sum"
+            result_node = self._reduce("add", tree_nodes)
+        else:
+            result_node = ReductionOp(self.cluster_state)
+            result_node.op_name = "add"
+            result_node.copy_on_op = self.copy_on_op
+            shape = None
+            for grid_entry in self.grid.get_entry_iterator():
+                node: TreeNode = self.graphs[grid_entry]
+                if shape is None:
+                    shape = node.shape()
+                else:
+                    assert shape == node.shape(), "shape mismatch for block_sum"
+                node.parent = result_node
+                result_node.add_child(node)
+
+        result_grid = ArrayGrid(shape=shape,
+                                block_shape=shape,
                                 dtype=self.dtype.__name__)
         result_graphs = np.empty(shape=result_grid.grid_shape, dtype=np.object)
-        add_reduce_op = ReductionOp(self.cluster_state)
-        add_reduce_op.op_name = "add"
-        add_reduce_op.copy_on_op = self.copy_on_op
-        for grid_entry in self.grid.get_entry_iterator():
-            node: TreeNode = self.graphs[grid_entry]
-            node.parent = add_reduce_op
-            add_reduce_op.add_child(node)
-        result_graphs[()] = add_reduce_op
+        if shape == ():
+            result_graphs[()] = result_node
+        else:
+            result_graphs[:] = result_node
         return GraphArray(result_grid, self.cluster_state, result_graphs,
                           copy_on_op=self.copy_on_op)
 
