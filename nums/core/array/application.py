@@ -14,7 +14,7 @@
 # limitations under the License.
 
 
-from typing import List
+from typing import List, Union
 
 import numpy as np
 
@@ -66,7 +66,7 @@ class ArrayApplication(object):
 
     def compute_block_shape(self,
                             shape: tuple,
-                            dtype: np.dtype,
+                            dtype: Union[type, np.dtype],
                             cluster_shape=None,
                             num_cores=None):
         # TODO (hme): Add support for downstream optimizer to decide block shape.
