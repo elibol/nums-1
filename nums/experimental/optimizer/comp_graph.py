@@ -802,7 +802,7 @@ class GraphArray(object):
             return other
         return self.from_ba(other, self.cluster_state)
 
-    def _reduce(self, op_name, tree_nodes):
+    def _tree_reduce(self, op_name, tree_nodes):
         q = tree_nodes
         while len(q) > 1:
             a: TreeNode = q.pop(0)
@@ -854,7 +854,7 @@ class GraphArray(object):
                         # We don't need to copy the node here since the local
                         # tree structure here is never exposed.
                         tree_nodes.append(dot_node)
-                    result_graphs[grid_entry] = self._reduce("add", tree_nodes)
+                    result_graphs[grid_entry] = self._tree_reduce("add", tree_nodes)
         return GraphArray(result_grid, self.cluster_state, result_graphs,
                           copy_on_op=self.copy_on_op)
 
@@ -872,7 +872,7 @@ class GraphArray(object):
                     shape = node.shape()
                 else:
                     assert shape == node.shape(), "shape mismatch for block_sum"
-            result_node = self._reduce("add", tree_nodes)
+            result_node = self._tree_reduce("add", tree_nodes)
         else:
             result_node = ReductionOp(self.cluster_state)
             result_node.op_name = "add"
