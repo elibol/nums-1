@@ -16,6 +16,7 @@
 
 import numpy as np
 
+from nums.core.systems import utils as systems_utils
 from nums.core.storage.storage import BimodalGaussian, ArrayGrid
 from nums.core.array.application import ArrayApplication
 from nums.core.array.blockarray import BlockArray
@@ -84,6 +85,10 @@ def test_split(app_inst: ArrayApplication):
 def test_touch(app_inst: ArrayApplication):
     ones = app_inst.ones((123, 456), (12, 34))
     assert ones.touch() is ones
+
+
+def test_num_cores(app_inst: ArrayApplication):
+    assert np.allclose(app_inst.num_cores_total(), systems_utils.get_num_cores())
 
 
 if __name__ == "__main__":
