@@ -474,24 +474,26 @@ class BlockArray(BlockArrayBase):
         if not isinstance(other, BlockArray):
             raise ValueError("Cannot automatically construct BlockArray for tensor operations.")
 
-        def basic_vector(ba: BlockArray, axis):
-            if len(ba.shape) == 0:
-                return False
-            if len(ba.shape) == 1:
-                return True
-            size = ba.shape[axis]
-            rest = list(ba.shape[:axis]) + list(ba.shape[axis + 1:])
-            return np.sum(rest) == len(rest) <= 1 < size
+        return self._tensordot(other, axes)
 
-        other = self.check_or_convert_other(other)
-        if basic_vector(self, len(self.shape) - 1) and basic_vector(other, 0):
-            return self._vecdot(other)
-        elif len(self.shape) == 2 and (len(other.shape) == 1
-                                       or (len(other.shape) == 2 and other.shape[1] == 1)):
-            # Optimized matrix vector multiply.
-            return self._matvec(other)
-        else:
-            return self._tensordot(other, axes)
+        # def basic_vector(ba: BlockArray, axis):
+        #     if len(ba.shape) == 0:
+        #         return False
+        #     if len(ba.shape) == 1:
+        #         return True
+        #     size = ba.shape[axis]
+        #     rest = list(ba.shape[:axis]) + list(ba.shape[axis + 1:])
+        #     return np.sum(rest) == len(rest) <= 1 < size
+        #
+        # other = self.check_or_convert_other(other)
+        # if basic_vector(self, len(self.shape) - 1) and basic_vector(other, 0):
+        #     return self._vecdot(other)
+        # elif len(self.shape) == 2 and (len(other.shape) == 1
+        #                                or (len(other.shape) == 2 and other.shape[1] == 1)):
+        #     # Optimized matrix vector multiply.
+        #     return self._matvec(other)
+        # else:
+        #     return self._tensordot(other, axes)
 
     def _compute_tensordot_grid_args(self, self_block: Block, other_block: Block):
         if np.prod(self_block.shape) < np.prod(other_block.shape):
