@@ -121,7 +121,6 @@ class TaskScheduler(RayScheduler):
         self.remote_functions[name] = self.remote(func, remote_params)
 
     def call_with_options(self, name, args, kwargs, options):
-        print("-"*25, "call_with_options", options, "-"*25)
         return self.remote_functions[name].options(**options).remote(*args, **kwargs)
 
     def call(self, name: str, *args, **kwargs):
@@ -131,6 +130,7 @@ class TaskScheduler(RayScheduler):
             del kwargs["syskwargs"]
             if "options" in syskwargs:
                 options = syskwargs["options"]
+                print("-" * 25, "call_with_options", options, "-" * 25)
                 return self.call_with_options(name, args, kwargs, options)
         return self.remote_functions[name].remote(*args, **kwargs)
 
