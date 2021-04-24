@@ -474,6 +474,9 @@ class BlockArray(BlockArrayBase):
         if not isinstance(other, BlockArray):
             raise ValueError("Cannot automatically construct BlockArray for tensor operations.")
 
+        # Even with _compute_tensordot_grid_args,
+        # retaining the below is beneficial.
+
         def basic_vector(ba: BlockArray, axis):
             if len(ba.shape) == 0:
                 return False
