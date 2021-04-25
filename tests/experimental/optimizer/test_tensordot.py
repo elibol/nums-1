@@ -30,8 +30,8 @@ from nums.core.systems.schedulers import RayScheduler, TaskScheduler, BlockCycli
 from nums.core.array.application import ArrayApplication, BlockArray
 from nums.core.array.base import BlockArrayBase
 
-from nums.experimental.optimizer.cluster_sim import ClusterState
-from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
+from nums.experimental.optimizer.clusterstate import ClusterState
+from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
 from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS
 import common
 

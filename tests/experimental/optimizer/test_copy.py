@@ -30,8 +30,8 @@ from nums.core.systems.schedulers import RayScheduler, TaskScheduler, BlockCycli
 from nums.core.array.application import ArrayApplication, BlockArray
 from nums.core.array.base import BlockArrayBase
 
-from nums.experimental.optimizer.cluster_sim import ClusterState
-from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, UnaryOp, BinaryOp, ReductionOp, Leaf
+from nums.experimental.optimizer.clusterstate import ClusterState
+from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, UnaryOp, BinaryOp, ReductionOp, Leaf
 from nums.experimental.optimizer.tree_search import RandomTS, RandomPlan, Plan
 import common
 
@@ -146,5 +146,5 @@ def test_matmat(app_inst: ArrayApplication):
 if __name__ == "__main__":
     from tests import conftest
 
-    app_inst = conftest.get_app("ray-cyclic")
+    app_inst = conftest.get_app("serial")
     test_matmat(app_inst)

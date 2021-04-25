@@ -28,8 +28,8 @@ import numpy as np
 from nums.core.storage.storage import BimodalGaussian
 from nums.core.array.application import ArrayApplication, BlockArray
 
-from nums.experimental.optimizer.cluster_sim import ClusterState
-from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
+from nums.experimental.optimizer.clusterstate import ClusterState
+from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
 import common
 
 

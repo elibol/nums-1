@@ -28,7 +28,7 @@ from nums.core.systems.systems import System, RaySystem
 from nums.core.systems.filesystem import FileSystem
 from nums.core.systems.schedulers import RayScheduler, BlockCyclicScheduler
 from nums.core.array.application import ArrayApplication, BlockArray
-from nums.experimental.optimizer.comp_graph import GraphArray
+from nums.experimental.optimizer.grapharray import GraphArray
 from nums.experimental.optimizer.tree_search import RandomTS
 
 

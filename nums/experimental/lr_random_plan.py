@@ -5,8 +5,8 @@ import numpy as np
 from nums.core.array.application import ArrayApplication
 from nums.core.array.blockarray import BlockArray
 from nums.core import application_manager as am
-from nums.experimental.optimizer.cluster_sim import ClusterState
-from nums.experimental.optimizer.comp_graph import GraphArray
+from nums.experimental.optimizer.clusterstate import ClusterState
+from nums.experimental.optimizer.grapharray import GraphArray
 from nums.experimental.optimizer.tree_search import RandomPlan
 import nums.numpy as nps
 

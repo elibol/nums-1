@@ -511,7 +511,7 @@ class BlockArray(BlockArrayBase):
                 for k in sum_dims:
                     self_block: Block = self.blocks[tuple(i + k)]
                     other_block: Block = other.blocks[tuple(k + j)]
-                    dot_grid_args = self._compute_tensordot_grid_args(self_block, other_block)
+                    dot_grid_args = self._compute_tensordot_syskwargs(self_block, other_block)
                     dotted_oid = self.system.bop("tensordot",
                                                  self_block.oid,
                                                  other_block.oid,
