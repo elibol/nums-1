@@ -201,7 +201,7 @@ def test_load_single_block_rhs():
 if __name__ == "__main__":
     from tests import conftest
 
-    app_inst = conftest.get_app("ray-cyclic")
+    app_inst = conftest.get_app("serial")
     test_matvec(app_inst)
     test_matmat(app_inst)
     test_big_matmat(app_inst)

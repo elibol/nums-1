@@ -426,19 +426,19 @@ class TreeReductionOp(TreeNode):
         assert len(leaf_set) == len(tree_nodes)
         return grouped_leafs
 
-    def _get_actions(self, leaf_pair, **kwargs):
-        assert len(leaf_pair) == 2
+    def _get_actions(self, leaf_ids, **kwargs):
+        assert len(leaf_ids) == 2
         use_all_nodes = kwargs.get("use_all_nodes", False)
         actions = []
         if use_all_nodes:
             node_ids = self.cluster_state.get_cluster_node_ids()
         else:
             # Restrict node ids to the nodes on which the leafs already reside.
-            left: Leaf = self.leafs_dict[leaf_pair[0]]
-            right: Leaf = self.leafs_dict[leaf_pair[1]]
+            left: Leaf = self.leafs_dict[leaf_ids[0]]
+            right: Leaf = self.leafs_dict[leaf_ids[1]]
             node_ids = self.cluster_state.union_nodes(left.block_id, right.block_id)
         for node_id in node_ids:
-            actions.append((self.tree_node_id, {"node_id": node_id}))
+            actions.append((self.tree_node_id, {"node_id": node_id, "leaf_ids": leaf_ids}))
         return actions
 
     def get_actions(self, **kwargs):
@@ -456,8 +456,8 @@ class TreeReductionOp(TreeNode):
                 for leaf_set in grouped_leafs.values():
                     for tnode_id in leaf_set:
                         self.action_leaf_q.append(tnode_id)
-            leaf_pair = tuple(self.action_leaf_q[:2])
-            return self._get_actions(leaf_pair)
+            leaf_id_pair = tuple(self.action_leaf_q[:2])
+            return self._get_actions(leaf_id_pair)
         return []
 
     def simulate_on(self, node_id, leaf_ids=None) -> np.ndarray:
@@ -475,13 +475,17 @@ class TreeReductionOp(TreeNode):
 
     def execute_on(self, node_id, leaf_ids=None, plan_only=False) -> TreeNode:
         assert len(leaf_ids) == 2
-        assert set(leaf_ids) == {self.action_leaf_q.pop(0), self.action_leaf_q.pop(0)}
         leafs = self.leafs_dict[leaf_ids[0]], self.leafs_dict[leaf_ids[1]]
         left, right = leafs
         assert isinstance(left, Leaf) and isinstance(right, Leaf)
         result = self._collapse(node_id, left, right, plan_only=plan_only)
         new_leaf: Leaf = result[0]
         new_block: Block = result[1]
+
+        # Update action leaf queue.
+        assert set(leaf_ids) == {self.action_leaf_q.pop(0), self.action_leaf_q.pop(0)}
+        self.action_leaf_q.append(new_leaf.tree_node_id)
+
         # This updates load on nodes and channels.
         # This also updates block states to indicate that they now reside on the provided nodes.
         # Update the cluster state after computing the leaf, so that transfer costs are properly

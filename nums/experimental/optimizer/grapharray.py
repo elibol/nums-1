@@ -28,7 +28,7 @@ from nums.experimental.optimizer.graph import TreeNode, Leaf, UnaryOp, BinaryOp
 from nums.experimental.optimizer.reduction_ops import ReductionOp, TreeReductionOp
 
 
-rop_cls = ReductionOp
+rop_cls = TreeReductionOp
 
 
 class GraphArray(object):
