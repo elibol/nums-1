@@ -15,7 +15,10 @@
 
 
 from typing import Union
+from multiprocessing import Pool
 import numpy as np
+import pickle
+import dill
 
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
 from nums.experimental.optimizer.cluster_sim import ClusterState
@@ -349,15 +352,17 @@ class Plan(object):
 
         return state.arr
 
-
+ 
 class ExhaustivePlanner(object):
     
-    def __init__(self, force_final_action=True):
+    def __init__(self, nprocs, force_final_action=True):
         # To ensure a fully exhaustive search, want to allow reduction nodes
         # to consider all pairs of incoming vertices. 
         self.max_reduction_pairs = None
+        self.nprocs = nprocs
         self.force_final_action = force_final_action
         self.plan = Plan(self.max_reduction_pairs, force_final_action)
+        self.pessimal_plan = Plan(self.max_reduction_pairs, force_final_action)
 
     # Generate an optimal plan via exhaustive search
     def make_plan(self, state: ProgramState):
@@ -366,19 +371,24 @@ class ExhaustivePlanner(object):
         self.make_plan_helper(state, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
         # Find minimum cost plan 
         min_cost = all_plans[0][1] # cost is the second entry in the tuples
+        max_cost = all_plans[0][1]
         for p in all_plans:
-            print("plan actions:", p[0].get_plan_actions())
-            print(">>>>> cost:", p[1])
+#            print("plan actions:", p[0].get_plan_actions())
+#            print(">>>>> cost:", p[1])
             cs = p[0].get_cluster_state()
-            print(">>>>> memory:", cs.resources[0])
-            print(">>>>> net_in:", cs.resources[1])
-            print(">>>>> net_out:", cs.resources[2])
+#            print(">>>>> memory:", cs.resources[0])
+#            print(">>>>> net_in:", cs.resources[1])
+#            print(">>>>> net_out:", cs.resources[2])
             if p[1] <= min_cost:
-                print(">>>>> PICKED PLAN")
+#                print(">>>>> PICKED PLAN")
                 min_cost = p[1]
                 self.plan = p[0]
                 self.plan.cost = p[1]
-        print("Total plans: ", len(all_plans))
+            if p[1] >= max_cost:
+                max_cost = p[1]
+                self.pessimal_plan = p[0]
+                self.pessimal_plan.cost = p[1]
+        return all_plans
 
     # Helper to make_plan: recursively generates all possible plans while tracking
     # cumulative cost.
@@ -419,12 +429,12 @@ class ExhaustivePlanner(object):
     def get_frontier_actions(self, state: ProgramState):
         # Get all frontier nodes.
         tnode_ids = list(state.tnode_map.keys())
-        print("frontier:", tnode_ids)
+#        print("frontier:", tnode_ids)
         # Collect all possible actions on each node.
         actions = []
         for tnode_id in tnode_ids:
             actions += state.tnode_map[tnode_id].actions
-        print("actions: (total)", len(actions), actions)
+#        print("actions: (total)", len(actions), actions)
         return actions       
 
     def solve(self, arr_in: GraphArray):
@@ -433,7 +443,18 @@ class ExhaustivePlanner(object):
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action,
                                            plan_only=True)
-        self.make_plan(state)
+        return self.make_plan(state)
+
+    def serialize(self, pessimal=False, filename=None):
+        p = self.plan
+        if pessimal:
+            p = self.pessimal_plan
+        if filename:
+            with open(filename, "wb") as f:
+                dill.dump(p, f, recurse=True)
+            return None
+        else:
+            return dill.dumps(p)
 
 
 class RandomPlan(object):

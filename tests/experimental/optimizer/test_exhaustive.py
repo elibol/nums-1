@@ -24,6 +24,7 @@ import itertools
 import time
 
 import numpy as np
+import dill
 
 from nums.core.systems.systems import System, SerialSystem, RaySystem
 from nums.core.systems.schedulers import RayScheduler, TaskScheduler, BlockCyclicScheduler
@@ -119,6 +120,9 @@ def test_big_matmat(app_inst: ArrayApplication):
 
 
 def test_load_sqr():
+    # Set up test: 5 compute nodes, 5 5x5 blocks in X and in Y
+    # Check that regular-path NumS gets the same result as NumPy
+    #   for X @ Y.
     num_nodes = 5
     app_inst = common.mock_cluster((num_nodes, 1))
     num_blocks = 5
@@ -128,7 +132,10 @@ def test_load_sqr():
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
     X: BlockArray = app_inst.array(real_X, X_block_shape)
     Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    result: BlockArray = X.T @ Y
+    assert np.allclose(result.get(), real_X.T @ real_Y)
 
+    # Set up system and initialize GraphArray versions of X, Y, and X@Y.
     lhs, rhs, axes = X.T, Y, 1
     system: System = lhs.system
     if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
@@ -140,6 +147,7 @@ def test_load_sqr():
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=True)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
 
+    # Check that all resources are equally used to start with
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
     net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
     net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
@@ -150,28 +158,60 @@ def test_load_sqr():
     assert max(cluster_state.resources[0]) == (num_blocks/num_nodes)*25*2
     assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
 
-    print("Input GA: ", tensordot_ga)
-    traverse(tensordot_ga)
+    # Run exhaustive planner, print details of best and worst plans.
     planner: ExhaustivePlanner = ExhaustivePlanner()
-    planner.solve(tensordot_ga)
+    all_plans = planner.solve(tensordot_ga)
     plan: Plan = planner.plan
+
     print("Executing plan: ", plan.get_plan_actions())
     print(">>> cost:", plan.get_cost())
     result_ga: GraphArray = plan.execute(tensordot_ga)
+    opt_result = BlockArray(result_ga.grid, system, result_ga.to_blocks())
+    assert app_inst.allclose(result, opt_result).get()
 
     rs = plan.get_cluster_state().resources
-    print("memory", rs[0])
-    print("net_in", rs[1])
-    print("net_out", rs[2])
+    print(">> memory", rs[0])
+    print(">> net_in", rs[1])
+    print(">> net_out", rs[2])
 
-    mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
-    net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
-    net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
-    # Can we predict the worst-case for a stochastic scheduler?
-    # All blocks (input and output) are 25 in size.
-    # For now, just go off known values.
-    # assert mem_diff <= 200 and net_in_diff <= 100 and net_out_diff <= 100
-    print(mem_diff, net_in_diff, net_out_diff)
+    print("Pessimal plan: ", planner.pessimal_plan.get_plan_actions())
+    print(">>> cost:", planner.pessimal_plan.get_cost())
+    pess_rs = planner.pessimal_plan.get_cluster_state().resources
+    print(">> memory", pess_rs[0])
+    print(">> net_in", pess_rs[1])
+    print(">> net_out", pess_rs[2])
+
+    # Check that each plan has the right operators and that a min-cost
+    # plan was chosen.
+    print("Checking that min cost plan chosen, all plans have right ops")
+    min_cost_plans = 0
+    for p, c in all_plans:
+        assert plan.get_cost() <= c
+        if plan.get_cost() == c:
+            min_cost_plans += 1
+        actions = p.get_plan_actions()
+        bop_mult = 0
+        bop_add = 0
+        reduc_add = 0
+        for a in actions:
+            if isinstance(a, BinaryOp) and a.op_name == "tensordot":
+                bop_mult += 1
+            elif isinstance(a, BinaryOp) and a.op_name == "add":
+                bop_add += 1
+            elif isinstance(a, ReductionOp) and a.op_name == "add":
+                reduc_add += 1
+        assert bop_mult == 5
+        assert bop_add == 1
+        assert reduc_add == 3
+    print("Total plans:", len(all_plans))
+    print("Total min-cost plans:", min_cost_plans)
+
+    # Print load balancing measures
+    mem_diff = max(rs[0]) - min(rs[0])
+    net_in_diff = max(rs[1]) - min(rs[1])
+    net_out_diff = max(rs[2]) - min(rs[2])
+
+    print("Load imbalance (mem, net in, net out):", mem_diff, net_in_diff, net_out_diff)
 
 
 def test_load_single_block_rhs():
@@ -220,6 +260,51 @@ def test_load_single_block_rhs():
     # assert mem_diff <= 25 and net_in_diff <= 50 and net_out_diff <= 250
 
 
+def test_save_to_file():
+    # Set up test: 5 compute nodes, 5 5x5 blocks in X and in Y
+    # Check that regular-path NumS gets the same result as NumPy
+    #   for X @ Y.
+    num_nodes = 1
+    app_inst = common.mock_cluster((num_nodes, 1))
+    num_blocks = 1
+    X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
+    Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
+    real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
+    real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
+    X: BlockArray = app_inst.array(real_X, X_block_shape)
+    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    result: BlockArray = X.T @ Y
+    assert np.allclose(result.get(), real_X.T @ real_Y)
+
+    # Set up system and initialize GraphArray versions of X, Y, and X@Y.
+    lhs, rhs, axes = X.T, Y, 1
+    system: System = lhs.system
+    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
+        cluster_state: ClusterState = ClusterState(system.scheduler.cluster_shape, system)
+    else:
+        cluster_state: ClusterState = ClusterState((1,), system)
+    lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state, copy_on_op=True)
+    rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=True)
+    tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
+    assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
+
+    # Run exhaustive planner.
+    planner: ExhaustivePlanner = ExhaustivePlanner()
+    all_plans = planner.solve(tensordot_ga)
+    plan: Plan = planner.plan
+
+    filename = "/tmp/plan.pkl"
+    planner.serialize(pessimal=False, filename=filename)
+    revived_plan: Plan = None
+    with open(filename, "rb") as f:
+        revived_plan = dill.load(f)
+
+    assert revived_plan.cost == plan.cost
+    assert len(plan.plan) == len(revived_plan.plan)
+    for i, step in enumerate(plan.plan):
+        assert step == revived_plan.plan[i]
+
+
 if __name__ == "__main__":
     from tests import conftest
 
@@ -227,5 +312,6 @@ if __name__ == "__main__":
 #    test_matvec(app_inst)
 #    test_matmat(app_inst)
 #    test_big_matmat(app_inst)
-    test_load_sqr()
+#    test_load_sqr()
+    test_save_to_file()
 #    test_load_single_block_rhs()
