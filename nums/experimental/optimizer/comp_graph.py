@@ -802,6 +802,33 @@ class GraphArray(object):
             return other
         return self.from_ba(other, self.cluster_state)
 
+    def _group_leafs_by_cluster_node(self, tree_nodes):
+        grouped_nodes = {}
+        leaf_set = set()
+        for node_id in self.cluster_state.get_cluster_node_ids():
+            if node_id not in grouped_nodes:
+                grouped_nodes[node_id] = []
+            for tree_node in tree_nodes:
+                assert isinstance(tree_node, Leaf)
+                leaf: Leaf = tree_node
+                if node_id in self.cluster_state.get_block_node_ids(leaf.block_id):
+                    if leaf not in leaf_set:
+                        grouped_nodes[node_id].append(leaf)
+                        leaf_set.add(leaf)
+        assert len(leaf_set) == len(tree_nodes)
+        return grouped_nodes
+
+    def _optimized_tree_reduce(self, op_name, tree_nodes):
+        for tree_node in tree_nodes:
+            if not isinstance(tree_node, Leaf):
+                return self._tree_reduce(op_name, tree_nodes)
+        grouped_nodes = self._group_leafs_by_cluster_node(tree_nodes)
+        reduced_nodes = []
+        for cluster_entry, nodes in grouped_nodes.items():
+            reduced_node = self._tree_reduce(op_name, nodes)
+            reduced_nodes.append(reduced_node)
+        return self._tree_reduce(op_name, reduced_nodes)
+
     def _tree_reduce(self, op_name, tree_nodes):
         q = tree_nodes
         while len(q) > 1:
@@ -854,7 +881,7 @@ class GraphArray(object):
                         # We don't need to copy the node here since the local
                         # tree structure here is never exposed.
                         tree_nodes.append(dot_node)
-                    result_graphs[grid_entry] = self._tree_reduce("add", tree_nodes)
+                    result_graphs[grid_entry] = self._optimized_tree_reduce("add", tree_nodes)
         return GraphArray(result_grid, self.cluster_state, result_graphs,
                           copy_on_op=self.copy_on_op)
 
@@ -872,7 +899,7 @@ class GraphArray(object):
                     shape = node.shape()
                 else:
                     assert shape == node.shape(), "shape mismatch for block_sum"
-            result_node = self._tree_reduce("add", tree_nodes)
+            result_node = self._optimized_tree_reduce("add", tree_nodes)
         else:
             result_node = ReductionOp(self.cluster_state)
             result_node.op_name = "add"
