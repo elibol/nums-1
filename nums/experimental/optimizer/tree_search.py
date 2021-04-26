@@ -365,7 +365,7 @@ class ExhaustiveProcess(multiprocessing.Process):
         self.nprocs = nprocs
 
     def run(self):
-#        print("Starting ", self.thread_id)
+        print("Starting ", self.thread_id)
         plans = []
         planner = ExhaustivePlanner(self.nprocs)
         planner.make_plan_helper(self.state, self.cost, self.plan, plans) #or make plan?
