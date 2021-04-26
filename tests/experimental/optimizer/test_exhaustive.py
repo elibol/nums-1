@@ -159,7 +159,7 @@ def test_load_sqr():
     assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
 
     # Run exhaustive planner, print details of best and worst plans.
-    planner: ExhaustivePlanner = ExhaustivePlanner(4)
+    planner: ExhaustivePlanner = ExhaustivePlanner(5)
     all_plans = planner.solve(tensordot_ga)
     plan: Plan = planner.plan
 

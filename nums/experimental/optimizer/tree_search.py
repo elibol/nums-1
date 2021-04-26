@@ -356,21 +356,17 @@ class Plan(object):
 
 
 class SubtreeRoot:
-    def __init__(self, id, state: ProgramState, cost, plan: Plan, next_actions=None):
+    def __init__(self, id, state: ProgramState, cost, plan: Plan):
         self.id = id
         self.state = state
         self.cost = cost
         self.plan = plan
-        self.next_actions = next_actions
 
 
 class ExhaustiveProcess(multiprocessing.Process):
     def __init__(self, thread_id, start_points, queue, nprocs):
         multiprocessing.Process.__init__(self)
         self.thread_id = thread_id
-        # self.state = state
-        # self.cost = cost
-        # self.plan = plan
         self.queue = queue
         self.nprocs = nprocs
         self.start_points = start_points
@@ -452,13 +448,14 @@ class ExhaustivePlanner(object):
             plans.append(next_plan)
             states.append(next_state)
             costs.append(step_cost)
+            if not unroll:
+                subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan))
 
         # Second layer: create processes for sets of paths.
-        # TODO: what if self.nprocs < total process we want to create?
         processes = []
 #        print(len(next_actions))
 #        print(next_actions)
-        process_id = 0
+        subtree_id = 0
         # next_actions is a list of lists.
         if unroll:
             for i, action_set in enumerate(next_actions):
@@ -477,23 +474,26 @@ class ExhaustivePlanner(object):
                                      step_cost,
                                      next_state.arr.cluster_state,
                                      is_done)
-                    processes.append(ExhaustiveProcess(process_id, next_state, step_cost + costs[i], next_plan, q, self.nprocs))
-                    process_id += 1
-        start_nodes = []
-        if self.nprocs > len(actions):
-            self.nprocs = len(actions)
-        
+                    subtrees.append(SubtreeRoot(subtree_id, next_state, step_cost + costs[i], next_plan))
+                    subtree_id += 1
+
+        # Round robin pickup of tasks
+        for i in range(len(subtrees)):
+            if i < self.nprocs:
+                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs))
+            else:
+                processes[i % self.nprocs].add_subtree(subtrees[i])
+
         # Run all processes.
         for p in processes:
             p.start()
 
         all_plans = []
         # print("proc plans length:", len(proc_plans))
-        procs = len(processes)
-        while procs > 0:
-#            print("Picked up plans from queue. {}/{}".format((len(processes) - procs) + 1, len(processes)))
-
-            procs -= 1
+        items = len(subtrees)
+        while items > 0:
+            print("Picked up plans from queue. {}/{}".format((len(subtrees) - items) + 1, len(subtrees)))
+            items -= 1
             all_plans += q.get()
 
         print("Waiting for all processes to join")
@@ -511,8 +511,7 @@ class ExhaustivePlanner(object):
         actions = self.get_frontier_actions(state)
         # proc_plans = {}
         processes = []
-        # TODO: what if self.nprocs < len(actions)?
-        start_nodes = []
+        subtrees = []
         if self.nprocs > len(actions):
             self.nprocs = len(actions)
 
@@ -528,16 +527,16 @@ class ExhaustivePlanner(object):
             next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
             # self.make_plan_helper(next_state, step_cost, next_plan, all_plans)
             # processes.append(ExhaustiveProcess(i, next_state, step_cost, next_plan, q, self.nprocs))
-            start_nodes.append(SubtreeRoot(i, next_state, step_cost, next_plan))
+            subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan))
 
         # Round robin pick up of tasks
         print("Number of first actions:", len(actions))
         process = 0
         for i in range(len(actions)):
             if process < self.nprocs:
-                processes.append(ExhaustiveProcess(i, [start_nodes[i]], q, self.nprocs))
+                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs))
             else:
-                processes[i % self.nprocs].add_subtree(start_nodes[i])
+                processes[i % self.nprocs].add_subtree(subtrees[i])
             process += 1
 
         for p in processes:
@@ -545,9 +544,9 @@ class ExhaustivePlanner(object):
 
         all_plans = []
         # print("proc plans length:", len(proc_plans))
-        items = len(start_nodes)
+        items = len(subtrees)
         while items > 0:
-            print("Picked up plans from queue. {}/{}".format((len(start_nodes) - items) + 1, len(start_nodes)))
+            print("Picked up plans from queue. {}/{}".format((len(subtrees) - items) + 1, len(subtrees)))
             items -= 1
             all_plans += q.get()
 
@@ -626,7 +625,7 @@ class ExhaustivePlanner(object):
         if self.nprocs == 1:
             all_plans = self.make_plan(state)
         else:
-            all_plans = self.make_plan_parallel(state)
+            all_plans = self.make_plan_parallel_unroll(state)
         t1 = time.time()
         print("Time to make plan:", t1-t0)
         return all_plans
