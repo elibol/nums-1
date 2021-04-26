@@ -24,6 +24,9 @@ import errno
 import numpy as np
 
 
+from nums.core import settings
+
+
 def get_num_cores():
     return multiprocessing.cpu_count()
 
@@ -31,7 +34,7 @@ def get_num_cores():
 def method_meta(num_returns=1):
     def inner(func):
         func.remote_params = {
-            "num_returns": num_returns
+            settings.ray_num_returns_str: num_returns
         }
         return func
     return inner

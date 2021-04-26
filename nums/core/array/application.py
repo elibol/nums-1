@@ -27,6 +27,7 @@ from nums.core.systems.schedulers import BlockCyclicScheduler
 from nums.core.systems import utils as systems_utils
 from nums.core.systems.filesystem import FileSystem
 from nums.core.array.random import NumsRandomState
+from nums.core import settings
 
 
 # pylint: disable = too-many-lines
@@ -538,7 +539,7 @@ class ArrayApplication(object):
             syskwargs = {
                 "grid_entry": grid_entry,
                 "grid_shape": arr.grid.grid_shape,
-                "options": {"num_returns": 2},
+                "options": {settings.ray_num_returns_str: 2},
             }
             reduction_result = self.system.arg_op(op_name,
                                                   block.oid,
@@ -585,8 +586,7 @@ class ArrayApplication(object):
                 r_oid = self.system.where(cond_oid, x_oid, y_oid, None,
                                           syskwargs={
                                               "grid_entry": grid_entry,
-                                              "grid_shape": condition.grid.grid_shape,
-                                              "options": {"num_returns": 1}
+                                              "grid_shape": condition.grid.grid_shape
                                           })
                 result.blocks[grid_entry].oid = r_oid
             return result
@@ -599,7 +599,9 @@ class ArrayApplication(object):
                                           syskwargs={
                                               "grid_entry": grid_entry,
                                               "grid_shape": condition.grid.grid_shape,
-                                              "options": {"num_returns": num_axes + 1}
+                                              "options": {
+                                                  settings.ray_num_returns_str: num_axes + 1
+                                              }
                                           })
                 block_oids, shape_oid = roids[:-1], roids[-1]
                 shape_oids.append(shape_oid)
@@ -831,8 +833,7 @@ class ArrayApplication(object):
                                          axis=1,
                                          syskwargs={
                                              "grid_entry": (i, 0),
-                                             "grid_shape": (grid_shape[0], 1),
-                                             "options": {"num_returns": 1}
+                                             "grid_shape": (grid_shape[0], 1)
                                          })
                           )
 
@@ -849,8 +850,7 @@ class ArrayApplication(object):
                                               axis=0,
                                               syskwargs={
                                                   "grid_entry": (0, 0),
-                                                  "grid_shape": (1, 1),
-                                                  "options": {"num_returns": 1}
+                                                  "grid_shape": (1, 1)
                                               })
         # If blocking is "tall-skinny," then we're done.
         if R_shape != R_block_shape:
@@ -916,7 +916,7 @@ class ArrayApplication(object):
                                           syskwargs={
                                               "grid_entry": (i, 0),
                                               "grid_shape": (grid_shape[0], 1),
-                                              "options": {"num_returns": 2}
+                                              "options": {settings.ray_num_returns_str: 2}
                                           })
             R_oids.append(R_oid)
             Q_oids.append(Q_oid)
@@ -929,7 +929,7 @@ class ArrayApplication(object):
                                         syskwargs={
                                             "grid_entry": (0, 0),
                                             "grid_shape": (1, 1),
-                                            "options": {"num_returns": 2}
+                                            "options": {settings.ray_num_returns_str: 2}
                                         })
 
         Q2_shape = tuple(Q2_shape)

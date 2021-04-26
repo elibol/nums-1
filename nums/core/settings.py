@@ -17,6 +17,7 @@
 import os
 from pathlib import Path
 import multiprocessing
+import warnings
 
 
 pj = lambda *paths: os.path.abspath(os.path.expanduser(os.path.join(*paths)))
@@ -43,6 +44,15 @@ ray_init_default = {
 # Compute settings.
 compute_name = os.environ.get("NUMS_COMPUTE", "numpy")
 
+
+# Backward compatibility with older versions of Ray.
+ray_version_beta = False
+try:
+    import ray
+    ray_version_beta = int(ray.__version__.split(".")[0]) == 0
+except:
+    warnings.warn("Unable to parse Ray version, assuming version > 1.0.0")
+ray_num_returns_str = "num_return_vals" if ray_version_beta else "num_returns"
 
 # NumPy operator map.
 np_ufunc_map = {

@@ -58,6 +58,11 @@ class ClusterState(object):
         # Dict from block id to list of node id.
         self.block_nodes: [int, int] = {}
 
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        d.pop("system")
+        return d
+
     def copy(self):
         new_cluster = ClusterState(self.cluster_shape, self.system, self.counter.copy())
         # Copy nodes.

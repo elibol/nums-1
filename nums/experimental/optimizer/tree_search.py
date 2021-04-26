@@ -19,6 +19,7 @@ from multiprocessing import Pool
 import numpy as np
 import pickle
 import dill
+import multiprocessing
 
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
 from nums.experimental.optimizer.cluster_sim import ClusterState
@@ -352,7 +353,26 @@ class Plan(object):
 
         return state.arr
 
- 
+
+class ExhaustiveProcess(multiprocessing.Process):
+    def __init__(self, thread_id, state: ProgramState, cost, plan: Plan, queue):
+        multiprocessing.Process.__init__(self)
+        self.thread_id = thread_id
+        self.state = state
+        self.cost = cost
+        self.plan = plan
+        self.queue = queue
+
+    def run(self):
+        print("Starting ", self.thread_id)
+        plans = []
+        planner = ExhaustivePlanner()
+        planner.make_plan_helper(self.state, self.cost, self.plan, plans) #or make plan?
+        self.queue.put(plans)
+        # self.all_plans[str(self.thread_id)] = plans
+        print("Exiting ", self.thread_id)
+
+
 class ExhaustivePlanner(object):
     
     def __init__(self, nprocs, force_final_action=True):
@@ -363,6 +383,51 @@ class ExhaustivePlanner(object):
         self.force_final_action = force_final_action
         self.plan = Plan(self.max_reduction_pairs, force_final_action)
         self.pessimal_plan = Plan(self.max_reduction_pairs, force_final_action)
+
+    def make_plan_parallel(self, state: ProgramState, numprocs):
+        # Make a thread for each exhaustive planner object
+        q = multiprocessing.Queue()
+        actions = self.get_frontier_actions(state)
+        # proc_plans = {}
+        processes = []
+        for i, a in enumerate(actions):
+            tree_node: TreeNode = state.tnode_map[a[0]].node
+            next_plan = Plan(self.max_reduction_pairs, self.force_final_action)
+            next_state = state.copy()  # copying the ProgramState invokes init_frontier,
+            # which finds nodes designated as frontier nodes.
+            cluster_state = next_state.arr.cluster_state.copy()
+            step_cost = next_state.commit_action(a)
+            is_done = len(next_state.tnode_map) == 0
+            next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
+            # self.make_plan_helper(next_state, step_cost, next_plan, all_plans)
+            processes.append(ExhaustiveProcess(i, next_state, step_cost, next_plan, q))
+
+        for p in processes:
+            p.start()
+
+        all_plans = []
+        # print("proc plans length:", len(proc_plans))
+        procs = len(processes)
+        while procs > 0:
+            print("Picked up plans from queue. {}/{}".format((len(processes) - procs) + 1, len(processes)))
+            procs -= 1
+            all_plans += q.get()
+
+        print("Waiting for all processes to join")
+        for p in processes:
+            p.join()
+        print("All joined")
+
+        # Find minimum cost plan
+        min_cost = all_plans[0][1] # cost is the second entry in the tuples
+        print("Total plans: ", len(all_plans))
+        print("Reviewing plans...")
+        for p in all_plans:
+            if p[1] <= min_cost:
+                min_cost = p[1]
+                self.plan = p[0]
+                self.plan.cost = p[1]
+        print("Chosen plan: ", self.plan, self.plan.cost)
 
     # Generate an optimal plan via exhaustive search
     def make_plan(self, state: ProgramState):
@@ -388,7 +453,8 @@ class ExhaustivePlanner(object):
                 max_cost = p[1]
                 self.pessimal_plan = p[0]
                 self.pessimal_plan.cost = p[1]
-        return all_plans
+        # print("Total plans: ", len(all_plans))
+
 
     # Helper to make_plan: recursively generates all possible plans while tracking
     # cumulative cost.
@@ -429,12 +495,12 @@ class ExhaustivePlanner(object):
     def get_frontier_actions(self, state: ProgramState):
         # Get all frontier nodes.
         tnode_ids = list(state.tnode_map.keys())
-#        print("frontier:", tnode_ids)
+        # print("frontier:", tnode_ids)
         # Collect all possible actions on each node.
         actions = []
         for tnode_id in tnode_ids:
             actions += state.tnode_map[tnode_id].actions
-#        print("actions: (total)", len(actions), actions)
+        # print("actions: (total)", len(actions), actions)
         return actions       
 
     def solve(self, arr_in: GraphArray):
@@ -443,7 +509,13 @@ class ExhaustivePlanner(object):
                                            max_reduction_pairs=self.max_reduction_pairs,
                                            force_final_action=self.force_final_action,
                                            plan_only=True)
-        return self.make_plan(state)
+        t0 = time.time()
+        if self.nprocs == 1:
+            self.make_plan(state)
+        else:
+            self.make_plan_parallel(state, self.nprocs)
+        t1 = time.time()
+        print("Time to make plan:", t1-t0)
 
     def serialize(self, pessimal=False, filename=None):
         p = self.plan
