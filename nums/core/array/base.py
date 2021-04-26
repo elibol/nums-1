@@ -45,6 +45,11 @@ class Block(object):
             block_id_counter += 1
             self.id = block_id_counter
 
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        d.pop("_system")
+        return d
+
     def __repr__(self):
         return "Block(" + str(self.oid) + ")"
 
