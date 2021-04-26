@@ -685,6 +685,7 @@ class RandomPlan(object):
         tree_node: TreeNode = state.tnode_map[action[0]].node
         cluster_state = state.arr.cluster_state.copy()
         cost = state.commit_action(action)
+        self.plan.cost += cost
         next_cluster_state = state.arr.cluster_state.copy()
         is_done = len(state.tnode_map) == 0
 

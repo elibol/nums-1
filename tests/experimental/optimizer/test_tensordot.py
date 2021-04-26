@@ -32,7 +32,7 @@ from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.cluster_sim import ClusterState
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
-from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS
+from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, RandomPlan
 import common
 
 
@@ -114,6 +114,8 @@ def test_load_sqr():
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
     X: BlockArray = app_inst.array(real_X, X_block_shape)
     Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    result: BlockArray = X.T @ Y
+    assert np.allclose(result.get(), real_X.T @ real_Y)
 
     lhs, rhs, axes = X.T, Y, 1
     system: System = lhs.system
@@ -133,14 +135,31 @@ def test_load_sqr():
     # We have 2 such matrices, so expect initial memory to be 500.
     assert max(cluster_state.resources[0]) == 500
     assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
-    result_ga: GraphArray = RandomTS(
-        seed=np.random.RandomState(1337),
-        max_samples_per_step=1,
-        max_reduction_pairs=1,
-        force_final_action=True).solve(tensordot_ga)
-    print("memory", cluster_state.resources[0])
-    print("net_in", cluster_state.resources[1])
-    print("net_out", cluster_state.resources[2])
+#    result_ga: GraphArray = RandomTS(
+#        seed=np.random.RandomState(1337),
+#        max_samples_per_step=1,
+#        max_reduction_pairs=1,
+#        force_final_action=True).solve(tensordot_ga)
+    planner: RandomPlan = RandomPlan()
+    start = time.time()
+    arr = planner.solve(tensordot_ga)
+    end = time.time()
+    print("Planning time:", end - start)
+    plan: Plan = planner.plan
+
+    print("Executing plan: ", plan.get_plan_actions())
+    print(">>> cost:", plan.get_cost())
+    start = time.time()
+    result_ga: GraphArray = plan.execute(tensordot_ga)
+    end = time.time()
+    print("Greedy plan exec time:", end - start)
+    opt_result = BlockArray(result_ga.grid, system, result_ga.to_blocks())
+    assert app_inst.allclose(result, opt_result).get()
+    
+    rs = plan.get_cluster_state().resources
+    print("memory", rs[0])
+    print("net_in", rs[1])
+    print("net_out", rs[2])
 
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
     net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
@@ -202,8 +221,8 @@ if __name__ == "__main__":
     from tests import conftest
 
     app_inst = conftest.get_app("ray-cyclic")
-    test_matvec(app_inst)
-    test_matmat(app_inst)
-    test_big_matmat(app_inst)
+#    test_matvec(app_inst)
+#    test_matmat(app_inst)
+#    test_big_matmat(app_inst)
     test_load_sqr()
-    test_load_single_block_rhs()
+#    test_load_single_block_rhs()
