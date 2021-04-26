@@ -477,8 +477,15 @@ class ExhaustivePlanner(object):
                                      step_cost,
                                      next_state.arr.cluster_state,
                                      is_done)
-                    processes.append(ExhaustiveProcess(process_id, next_state, step_cost + costs[i], next_plan, q, self.nprocs))
+                    # Round robin pick up of tasks
+                    start_node = SubtreeRoot(process_id, next_state, step_cost + costs[i], next_plan)
+
+                    if process_id < self.nprocs:
+                        processes.append(ExhaustiveProcess(process_id, [start_node], q, self.nprocs))
+                    else:
+                        processes[process_id % self.nprocs].add_subtree(start_node)
                     process_id += 1
+        
         start_nodes = []
         if self.nprocs > len(actions):
             self.nprocs = len(actions)
@@ -492,7 +499,6 @@ class ExhaustivePlanner(object):
         procs = len(processes)
         while procs > 0:
 #            print("Picked up plans from queue. {}/{}".format((len(processes) - procs) + 1, len(processes)))
-
             procs -= 1
             all_plans += q.get()
 
@@ -532,13 +538,11 @@ class ExhaustivePlanner(object):
 
         # Round robin pick up of tasks
         print("Number of first actions:", len(actions))
-        process = 0
         for i in range(len(actions)):
-            if process < self.nprocs:
+            if i < self.nprocs:
                 processes.append(ExhaustiveProcess(i, [start_nodes[i]], q, self.nprocs))
             else:
                 processes[i % self.nprocs].add_subtree(start_nodes[i])
-            process += 1
 
         for p in processes:
             p.start()
@@ -626,7 +630,7 @@ class ExhaustivePlanner(object):
         if self.nprocs == 1:
             all_plans = self.make_plan(state)
         else:
-            all_plans = self.make_plan_parallel(state)
+            all_plans = self.make_plan_parallel_unroll(state)
         t1 = time.time()
         print("Time to make plan:", t1-t0)
         return all_plans
