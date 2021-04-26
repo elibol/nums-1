@@ -165,7 +165,13 @@ def test_load_sqr():
 
     print("Executing plan: ", plan.get_plan_actions())
     print(">>> cost:", plan.get_cost())
+    start = time.time()
     result_ga: GraphArray = plan.execute(tensordot_ga)
+    end = time.time()
+    print("Optimal plan exec time:", end - start)
+    start = time.time()
+    planner.pessimal_plan.execute(tensordot_ga)
+    end = time.time()
     opt_result = BlockArray(result_ga.grid, system, result_ga.to_blocks())
     assert app_inst.allclose(result, opt_result).get()
 
@@ -176,6 +182,7 @@ def test_load_sqr():
 
     print("Pessimal plan: ", planner.pessimal_plan.get_plan_actions())
     print(">>> cost:", planner.pessimal_plan.get_cost())
+    print("Pessimal plan exec time:", end - start)
     pess_rs = planner.pessimal_plan.get_cluster_state().resources
     print(">> memory", pess_rs[0])
     print(">> net_in", pess_rs[1])
