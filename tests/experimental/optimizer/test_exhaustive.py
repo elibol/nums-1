@@ -33,7 +33,7 @@ from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.cluster_sim import ClusterState
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
-from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, ExhaustivePlanner, Plan
+from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, ExhaustivePlanner, ExhaustiveProcess, Plan
 import common
 
 
@@ -50,7 +50,7 @@ def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
     global random_state
     print("op grid shape", tensordot_ga.grid.grid_shape)
 
-    planner: ExhaustivePlanner = ExhaustivePlanner()
+    planner: ExhaustivePlanner = ExhaustivePlanner(1)
     planner.solve(tensordot_ga)
     plan: Plan = planner.plan
     result_ga: GraphArray = plan.execute(tensordot_ga)
@@ -159,7 +159,7 @@ def test_load_sqr():
     assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
 
     # Run exhaustive planner, print details of best and worst plans.
-    planner: ExhaustivePlanner = ExhaustivePlanner()
+    planner: ExhaustivePlanner = ExhaustivePlanner(8)
     all_plans = planner.solve(tensordot_ga)
     plan: Plan = planner.plan
 
@@ -289,7 +289,7 @@ def test_save_to_file():
     assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
 
     # Run exhaustive planner.
-    planner: ExhaustivePlanner = ExhaustivePlanner()
+    planner: ExhaustivePlanner = ExhaustivePlanner(1)
     all_plans = planner.solve(tensordot_ga)
     plan: Plan = planner.plan
 
@@ -312,6 +312,6 @@ if __name__ == "__main__":
 #    test_matvec(app_inst)
 #    test_matmat(app_inst)
 #    test_big_matmat(app_inst)
-#    test_load_sqr()
-    test_save_to_file()
+    test_load_sqr()
+#    test_save_to_file()
 #    test_load_single_block_rhs()

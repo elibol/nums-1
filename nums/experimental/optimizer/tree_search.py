@@ -15,11 +15,11 @@
 
 
 from typing import Union
-from multiprocessing import Pool
 import numpy as np
 import pickle
 import dill
 import multiprocessing
+import time
 
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
 from nums.experimental.optimizer.cluster_sim import ClusterState
@@ -355,22 +355,23 @@ class Plan(object):
 
 
 class ExhaustiveProcess(multiprocessing.Process):
-    def __init__(self, thread_id, state: ProgramState, cost, plan: Plan, queue):
+    def __init__(self, thread_id, state: ProgramState, cost, plan: Plan, queue, nprocs):
         multiprocessing.Process.__init__(self)
         self.thread_id = thread_id
         self.state = state
         self.cost = cost
         self.plan = plan
         self.queue = queue
+        self.nprocs = nprocs
 
     def run(self):
-        print("Starting ", self.thread_id)
+#        print("Starting ", self.thread_id)
         plans = []
-        planner = ExhaustivePlanner()
+        planner = ExhaustivePlanner(self.nprocs)
         planner.make_plan_helper(self.state, self.cost, self.plan, plans) #or make plan?
         self.queue.put(plans)
         # self.all_plans[str(self.thread_id)] = plans
-        print("Exiting ", self.thread_id)
+#        print("Exiting ", self.thread_id)
 
 
 class ExhaustivePlanner(object):
@@ -384,12 +385,108 @@ class ExhaustivePlanner(object):
         self.plan = Plan(self.max_reduction_pairs, force_final_action)
         self.pessimal_plan = Plan(self.max_reduction_pairs, force_final_action)
 
-    def make_plan_parallel(self, state: ProgramState, numprocs):
+    def find_best_and_worst_plans(self, all_plans):
+        min_cost = all_plans[0][1] # cost is the second entry in the tuples
+        max_cost = all_plans[0][1]
+        print("Total plans: ", len(all_plans))
+        print("Reviewing plans...")
+        for p in all_plans:
+            if p[1] <= min_cost:
+                min_cost = p[1]
+                self.plan = p[0]
+                self.plan.cost = p[1]
+            if p[1] >= max_cost:
+                max_cost = p[1]
+                self.pessimal_plan = p[0]
+                self.pessimal_plan.cost = p[1]
+        print("Chosen plan: ", self.plan, self.plan.cost)
+        print("Worst plan: ", self.pessimal_plan, self.pessimal_plan.cost)
+
+    def make_plan_parallel_unroll(self, state: ProgramState):
+        # Make a thread for each exhaustive process
+        q = multiprocessing.Queue()
+        actions = self.get_frontier_actions(state)
+
+        # First layer: branch on first possible actions
+        plans = []
+        states = []
+        next_actions = []
+        costs = []
+        for i, a in enumerate(actions):
+            tree_node: TreeNode = state.tnode_map[a[0]].node
+            next_plan = Plan(self.max_reduction_pairs, self.force_final_action)
+            next_state = state.copy()  # copying the ProgramState invokes
+                                       # init_frontier, which finds nodes 
+                                       # designated as frontier nodes.
+            cluster_state = next_state.arr.cluster_state.copy()
+            step_cost = next_state.commit_action(a)
+            is_done = len(next_state.tnode_map) == 0
+            next_plan.append(cluster_state,
+                             tree_node,
+                             a, 
+                             step_cost,
+                             next_state.arr.cluster_state, 
+                             is_done)
+            next_actions.append(self.get_frontier_actions(next_state))
+            plans.append(next_plan)
+            states.append(next_state)
+            costs.append(step_cost)
+
+        # Second layer: create processes for sets of paths.
+        # TODO: what if self.nprocs < total process we want to create?
+        processes = []
+#        print(len(next_actions))
+#        print(next_actions)
+        process_id = 0
+        # next_actions is a list of lists.
+        for i, action_set in enumerate(next_actions):
+            for a in action_set:
+                tree_node: TreeNode = state.tnode_map[a[0]].node
+                next_plan = plans[i].copy()
+                next_state = states[i].copy()  # copying the ProgramState invokes
+                                           # init_frontier, which finds nodes 
+                                           # designated as frontier nodes.
+                cluster_state = next_state.arr.cluster_state.copy()
+                step_cost = next_state.commit_action(a)
+                is_done = len(next_state.tnode_map) == 0
+                next_plan.append(cluster_state,
+                                 tree_node,
+                                 a, 
+                                 step_cost,
+                                 next_state.arr.cluster_state, 
+                                 is_done)
+                processes.append(ExhaustiveProcess(process_id, next_state, step_cost + costs[i], next_plan, q, self.nprocs))
+                process_id += 1 
+        
+        # Run all processes.
+        for p in processes:
+            p.start()
+
+        all_plans = []
+        # print("proc plans length:", len(proc_plans))
+        procs = len(processes)
+        while procs > 0:
+#            print("Picked up plans from queue. {}/{}".format((len(processes) - procs) + 1, len(processes)))
+
+            procs -= 1
+            all_plans += q.get()
+
+        print("Waiting for all processes to join")
+        for p in processes:
+            p.join()
+        print("All joined")
+
+        # Find minimum cost plan
+        self.find_best_and_worst_plans(all_plans)
+        return all_plans
+
+    def make_plan_parallel(self, state: ProgramState):
         # Make a thread for each exhaustive planner object
         q = multiprocessing.Queue()
         actions = self.get_frontier_actions(state)
         # proc_plans = {}
         processes = []
+        # TODO: what if self.nprocs < len(actions)?
         for i, a in enumerate(actions):
             tree_node: TreeNode = state.tnode_map[a[0]].node
             next_plan = Plan(self.max_reduction_pairs, self.force_final_action)
@@ -401,7 +498,7 @@ class ExhaustivePlanner(object):
             is_done = len(next_state.tnode_map) == 0
             next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
             # self.make_plan_helper(next_state, step_cost, next_plan, all_plans)
-            processes.append(ExhaustiveProcess(i, next_state, step_cost, next_plan, q))
+            processes.append(ExhaustiveProcess(i, next_state, step_cost, next_plan, q, self.nprocs))
 
         for p in processes:
             p.start()
@@ -420,21 +517,8 @@ class ExhaustivePlanner(object):
         print("All joined")
 
         # Find minimum cost plan
-        min_cost = all_plans[0][1] # cost is the second entry in the tuples
-        max_cost = all_plans[0][1]
-        print("Total plans: ", len(all_plans))
-        print("Reviewing plans...")
-        for p in all_plans:
-            if p[1] <= min_cost:
-                min_cost = p[1]
-                self.plan = p[0]
-                self.plan.cost = p[1]
-            if p[1] >= max_cost:
-                max_cost = p[1]
-                self.pessimal_plan = p[0]
-                self.pessimal_plan.cost = p[1]
-        print("Chosen plan: ", self.plan, self.plan.cost)
-        print("Worst plan: ", self.pessimal_plan, self.pessimal_plan.cost)
+        self.find_best_and_worst_plans(all_plans)
+        return all_plans
 
     # Generate an optimal plan via exhaustive search
     def make_plan(self, state: ProgramState):
@@ -442,26 +526,8 @@ class ExhaustivePlanner(object):
         all_plans = []
         self.make_plan_helper(state, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
         # Find minimum cost plan 
-        min_cost = all_plans[0][1] # cost is the second entry in the tuples
-        max_cost = all_plans[0][1]
-        for p in all_plans:
-#            print("plan actions:", p[0].get_plan_actions())
-#            print(">>>>> cost:", p[1])
-            cs = p[0].get_cluster_state()
-#            print(">>>>> memory:", cs.resources[0])
-#            print(">>>>> net_in:", cs.resources[1])
-#            print(">>>>> net_out:", cs.resources[2])
-            if p[1] <= min_cost:
-#                print(">>>>> PICKED PLAN")
-                min_cost = p[1]
-                self.plan = p[0]
-                self.plan.cost = p[1]
-            if p[1] >= max_cost:
-                max_cost = p[1]
-                self.pessimal_plan = p[0]
-                self.pessimal_plan.cost = p[1]
-        # print("Total plans: ", len(all_plans))
-
+        self.find_best_and_worst_plans(all_plans)
+        return all_plans
 
     # Helper to make_plan: recursively generates all possible plans while tracking
     # cumulative cost.
@@ -518,11 +584,12 @@ class ExhaustivePlanner(object):
                                            plan_only=True)
         t0 = time.time()
         if self.nprocs == 1:
-            self.make_plan(state)
+            all_plans = self.make_plan(state)
         else:
-            self.make_plan_parallel(state, self.nprocs)
+            all_plans = self.make_plan_parallel_unroll(state)
         t1 = time.time()
         print("Time to make plan:", t1-t0)
+        return all_plans
 
     def serialize(self, pessimal=False, filename=None):
         p = self.plan
