@@ -393,8 +393,9 @@ class ExhaustivePlanner(object):
         for i, a in enumerate(actions):
             tree_node: TreeNode = state.tnode_map[a[0]].node
             next_plan = Plan(self.max_reduction_pairs, self.force_final_action)
-            next_state = state.copy()  # copying the ProgramState invokes init_frontier,
-            # which finds nodes designated as frontier nodes.
+            next_state = state.copy()  # copying the ProgramState invokes
+                                       # init_frontier, which finds nodes 
+                                       # designated as frontier nodes.
             cluster_state = next_state.arr.cluster_state.copy()
             step_cost = next_state.commit_action(a)
             is_done = len(next_state.tnode_map) == 0
@@ -420,6 +421,7 @@ class ExhaustivePlanner(object):
 
         # Find minimum cost plan
         min_cost = all_plans[0][1] # cost is the second entry in the tuples
+        max_cost = all_plans[0][1]
         print("Total plans: ", len(all_plans))
         print("Reviewing plans...")
         for p in all_plans:
@@ -427,7 +429,12 @@ class ExhaustivePlanner(object):
                 min_cost = p[1]
                 self.plan = p[0]
                 self.plan.cost = p[1]
+            if p[1] >= max_cost:
+                max_cost = p[1]
+                self.pessimal_plan = p[0]
+                self.pessimal_plan.cost = p[1]
         print("Chosen plan: ", self.plan, self.plan.cost)
+        print("Worst plan: ", self.pessimal_plan, self.pessimal_plan.cost)
 
     # Generate an optimal plan via exhaustive search
     def make_plan(self, state: ProgramState):
