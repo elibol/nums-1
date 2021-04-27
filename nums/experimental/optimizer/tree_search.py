@@ -549,6 +549,7 @@ class ExhaustivePlanner(object):
             # processes.append(ExhaustiveProcess(i, next_state, step_cost, next_plan, q, self.nprocs))
             subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan))
 
+
         # Round robin pickup of tasks
         for i in range(len(subtrees)):
             if i < self.nprocs:
@@ -716,6 +717,7 @@ class RandomPlan(object):
         tree_node: TreeNode = state.tnode_map[action[0]].node
         cluster_state = state.arr.cluster_state.copy()
         cost = state.commit_action(action)
+        self.plan.cost += cost
         next_cluster_state = state.arr.cluster_state.copy()
         is_done = len(state.tnode_map) == 0
 
