@@ -25,15 +25,14 @@ import time
 
 import numpy as np
 
-from nums.core.systems.systems import System, SerialSystem, RaySystem
-from nums.core.systems.schedulers import RayScheduler, TaskScheduler, BlockCyclicScheduler
+from nums.core.systems.systems import RaySystem
 from nums.core.array.application import ArrayApplication, BlockArray
 from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.clusterstate import ClusterState
 from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, UnaryOp, BinaryOp, ReductionOp, Leaf
 from nums.experimental.optimizer.tree_search import RandomTS, RandomPlan, Plan
-import common
+import conftest
 
 
 def random_solve(ga, seed):
@@ -81,11 +80,7 @@ def graphs_equal(ga1: GraphArray, ga2: GraphArray):
 
 
 def tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes, copy_on_op=True) -> GraphArray:
-    system = lhs.system
-    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
-        cluster_state = ClusterState(system.scheduler.cluster_shape, system)
-    else:
-        cluster_state = ClusterState((1,), system)
+    cluster_state = ClusterState(lhs.cm.devices())
     lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state, copy_on_op=copy_on_op)
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=copy_on_op)
     return lhs_ga.tensordot(rhs_ga, axes=axes)
@@ -93,14 +88,13 @@ def tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes, copy_on_op=True) -
 
 def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
                         copy_on_op=True) -> BlockArray:
-    system = lhs.system
     tensordot_ga = tensordot(lhs, rhs, axes, copy_on_op)
     result_ga: GraphArray = RandomTS(
-        seed=common.rs,
+        seed=conftest.rs,
         max_samples_per_step=1,
         max_reduction_pairs=1,
         force_final_action=True).solve(tensordot_ga)
-    return BlockArray(result_ga.grid, system, result_ga.to_blocks())
+    return BlockArray(result_ga.grid, lhs.cm, result_ga.to_blocks())
 
 
 def test_matmat(app_inst: ArrayApplication):

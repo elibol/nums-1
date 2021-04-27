@@ -20,12 +20,15 @@ import copy
 import numpy as np
 import scipy.special
 
+from typing import Union
 from nums.core.storage.storage import ArrayGrid
 from nums.core.array.base import BlockArrayBase, Block
 from nums.core.array import utils as array_utils
 from nums.experimental.optimizer.clusterstate import ClusterState
 from nums.experimental.optimizer.graph import TreeNode, Leaf, UnaryOp, BinaryOp
 from nums.experimental.optimizer.reduction_ops import ReductionOp, TreeReductionOp
+from nums.core.compute.compute_manager import ComputeManager
+from nums.core.grid.grid import DeviceID
 
 
 rop_cls = TreeReductionOp
@@ -39,9 +42,11 @@ class GraphArray(object):
         for grid_entry in ba.grid.get_entry_iterator():
             block: Block = ba.blocks[grid_entry]
             # Allocate the block to the node on which it's created.
-            node_id = cluster_state.get_cluster_entry(block.true_grid_entry())
-            cluster_state.add_block(block, node_ids=[node_id])
-            cluster_state.init_mem_load(node_id, block.id)
+            cm: ComputeManager = ComputeManager.instance
+            device_id: DeviceID = cm.device_grid.get_device_id(block.true_grid_entry(),
+                                                               block.true_grid_shape())
+            cluster_state.add_block(block, device_ids=[device_id])
+            cluster_state.init_mem_load(device_id, block.id)
 
             # Create the leaf representing this block for future computations.
             leaf: Leaf = Leaf(cluster_state)
@@ -182,13 +187,12 @@ class GraphArray(object):
     def __matmul__(self, other):
         return self.tensordot(other, axes=1)
 
-    def ga_from_arr(self, arr, result_shape):
-        sample_idx = tuple(0 for dim in arr.shape)
+    def ga_from_arr(self, arr: Union[TreeNode, np.ndarray], result_shape: tuple):
         if isinstance(arr, TreeNode):
             sample_node: TreeNode = arr
             assert result_shape == ()
         else:
-            sample_node: TreeNode = arr[sample_idx]
+            sample_node: TreeNode = arr[tuple(0 for dim in arr.shape)]
         result_block_shape = sample_node.shape()
         result_dtype_str = self.grid.dtype.__name__
         result_grid = ArrayGrid(shape=result_shape,

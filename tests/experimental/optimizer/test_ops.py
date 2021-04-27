@@ -28,14 +28,13 @@ import numpy as np
 from nums.core.array.application import ArrayApplication, BlockArray
 from nums.experimental.optimizer.clusterstate import ClusterState
 from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
-from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS
-import common
+from nums.experimental.optimizer.tree_search import RandomTS, DeviceGridTS
+import conftest
 
 
-def test_neg():
-    cluster_shape = (4, 1)
-    app: ArrayApplication = common.mock_cluster(cluster_shape)
-    cluster_state = ClusterState(cluster_shape, app.system)
+def test_neg(app_inst_mock_small):
+    app = app_inst_mock_small
+    cluster_state = ClusterState(app.cm.devices())
 
     A_shape, A_block_shape = (5, 10), (5, 5)
     real_A = np.random.random(np.product(A_shape)).reshape(A_shape)
@@ -47,14 +46,13 @@ def test_neg():
         max_samples_per_step=1,
         max_reduction_pairs=1,
         force_final_action=True).solve(prob_ga)
-    result_ba = BlockArray(result_ga.grid, app.system, result_ga.to_blocks())
+    result_ba = BlockArray(result_ga.grid, app.cm, result_ga.to_blocks())
     assert app.allclose(-A, result_ba)
 
 
-def test_root_uop():
-    cluster_shape = (4, 1)
-    app: ArrayApplication = common.mock_cluster(cluster_shape)
-    cluster_state = ClusterState(cluster_shape, app.system)
+def test_root_uop(app_inst_mock_small):
+    app = app_inst_mock_small
+    cluster_state = ClusterState(app.cm.devices())
 
     one_ba: BlockArray = app.one
     one_ga: GraphArray = GraphArray.from_ba(app.one, cluster_state)
@@ -69,15 +67,14 @@ def test_root_uop():
         max_samples_per_step=1,
         max_reduction_pairs=1,
         force_final_action=True).solve(prob_ga)
-    result_ba = BlockArray(result_ga.grid, app.system, result_ga.to_blocks())
+    result_ba = BlockArray(result_ga.grid, app.cm, result_ga.to_blocks())
     print(app.allclose(result_ba, one_ba / (one_ba + app.exp(-(A + A)))).get())
     assert app.allclose(result_ba, one_ba / (one_ba + app.exp(-(A + A))))
 
 
-def test_transpose():
-    cluster_shape = (4, 1)
-    app: ArrayApplication = common.mock_cluster(cluster_shape)
-    cluster_state = ClusterState(cluster_shape, app.system)
+def test_transpose(app_inst_mock_small):
+    app = app_inst_mock_small
+    cluster_state = ClusterState(app.cm.devices())
 
     A_shape, A_block_shape = (5, 10), (5, 5)
     real_A = np.random.random(np.product(A_shape)).reshape(A_shape)
@@ -89,13 +86,14 @@ def test_transpose():
         max_samples_per_step=1,
         max_reduction_pairs=1,
         force_final_action=True).solve(prob_ga)
-    result_ba = BlockArray(result_ga.grid, app.system, result_ga.to_blocks())
+    result_ba = BlockArray(result_ga.grid, app.cm, result_ga.to_blocks())
     assert app.allclose(A.T @ A, result_ba)
 
 
 if __name__ == "__main__":
-    from tests import conftest
-
-    test_neg()
-    test_root_uop()
-    test_transpose()
+    import conftest
+    app = conftest.mock_cluster((4, 1))
+    test_neg(app)
+    test_root_uop(app)
+    test_transpose(app)
+    conftest.destroy_mock_cluster(app)

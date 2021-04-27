@@ -194,10 +194,10 @@ if __name__ == "__main__":
     # pylint: disable=import-error
     from tests import conftest
 
-    app_inst = conftest.get_app("serial")
+    app_inst = conftest.get_app("ray")
     # test_inv_assumptions(app_inst)
-    test_inv(app_inst)
-    # test_qr(app_inst)
+    # test_inv(app_inst)
+    test_qr(app_inst)
     # test_svd(app_inst)
     # test_lr(app_inst)
     # test_rr(app_inst)

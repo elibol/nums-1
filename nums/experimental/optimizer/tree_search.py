@@ -19,6 +19,7 @@ import numpy as np
 
 from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
 from nums.experimental.optimizer.clusterstate import ClusterState
+from nums.core.compute.compute_manager import ComputeManager
 
 random_state = np.random.RandomState(1337)
 
@@ -47,7 +48,8 @@ class ProgramState(object):
         self.arr: GraphArray = arr
         self.force_final_action = force_final_action
         self.get_action_kwargs = {"max_reduction_pairs": max_reduction_pairs,
-                                  "unique_reduction_pairs": unique_reduction_pairs}
+                                  "unique_reduction_pairs": unique_reduction_pairs,
+                                  "use_all_devices": False}
         self.plan_only = plan_only
         # Keys are tree_node_id
         # Values are a 2-tuple corresponding to the actual tree node and the actions that can
@@ -70,22 +72,23 @@ class ProgramState(object):
         for tnode in start_node.get_frontier():
             self.add_frontier_node(tnode)
 
-    def get_bc_action(self, tnode: TreeNode):
+    def get_final_action(self, tnode: TreeNode):
         # This is hacky, but no good way to do it w/ current abstractions.
+        # Gets the final action to perform on a graph array.
+        # This is to ensure the output graph array satisfies device grid layout
+        # assumptions.
+        cm: ComputeManager = ComputeManager.instance
+        grid_entry = self.get_tnode_grid_entry(tnode)
+        grid_shape = self.arr.grid.grid_shape
+        device_id = cm.device_grid.get_device_id(grid_entry, grid_shape)
         if isinstance(tnode, BinaryOp):
-            grid_entry = self.get_tnode_grid_entry(tnode)
-            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry)
-            actions = [(tnode.tree_node_id, {"node_id": node_id})]
+            actions = [(tnode.tree_node_id, {"device_id": device_id})]
         elif isinstance(tnode, ReductionOp):
             leaf_ids = tuple(tnode.leafs_dict.keys())[:2]
-            grid_entry = self.get_tnode_grid_entry(tnode)
-            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry)
-            actions = [(tnode.tree_node_id, {"node_id": node_id,
+            actions = [(tnode.tree_node_id, {"device_id": device_id,
                                              "leaf_ids": leaf_ids})]
         elif isinstance(tnode, UnaryOp):
-            grid_entry = self.get_tnode_grid_entry(tnode)
-            node_id = self.arr.cluster_state.get_cluster_entry(grid_entry)
-            actions = [(tnode.tree_node_id, {"node_id": node_id})]
+            actions = [(tnode.tree_node_id, {"device_id": device_id})]
         else:
             raise Exception()
         return actions
@@ -96,10 +99,11 @@ class ProgramState(object):
         if self.force_final_action and tnode.parent is None:
             if isinstance(tnode, (BinaryOp, UnaryOp)) or (isinstance(tnode, ReductionOp)
                                                           and len(tnode.children_dict) == 2):
-                # This is a root frontier binary op or reduction op with 2 children.
+                # This is a root frontier op.
                 # The next action is the last action,
-                # so intercept action to force computation on root node entry.
-                actions = self.get_bc_action(tnode)
+                # so intercept action to force computation on device
+                # to satisfy device placement assumptions.
+                actions = self.get_final_action(tnode)
         if actions is None:
             actions = tnode.get_actions(**self.get_action_kwargs)
         self.tnode_map[tnode.tree_node_id] = TreeNodeActionPair(tnode, actions)
@@ -118,25 +122,18 @@ class ProgramState(object):
         # The frontier needs to be updated, so remove the current node from frontier.
         del self.tnode_map[tnode_id]
         if old_node.parent is None and old_node is not new_node:
-#            print("We operated on a root node:", old_node, new_node)
             # We operated on a root node, so update the array.
             self.update_root(old_node, new_node)
         if isinstance(new_node, Leaf):
-#            print("New node is a leaf:", old_node, new_node)
             # If it's a leaf node, its parent may now be a frontier node.
             new_node_parent: TreeNode = new_node.parent
-#            if new_node_parent is not None:
-#                print(">>>> has a parent:", new_node_parent)
             if new_node_parent is not None and new_node_parent.is_frontier():
-#                print(">>>> parent is frontier node")
                 self.add_frontier_node(new_node_parent)
         else:
             # There's still work that needs to be done to compute this node.
             # Add the returned node to the frontier.
             # Either a BinaryOp or ReductionOp.
-#            print("Still have work to compute node:", old_node, new_node)
             if new_node.is_frontier():
-#                print(">>>> new node is frontier")
                 self.add_frontier_node(new_node)
         # That's it. This program state is now updated.
         return self.objective(self.arr.cluster_state.resources)
@@ -149,9 +146,10 @@ class ProgramState(object):
         return self.objective(new_resources)
 
     def objective(self, resources):
-        max_axes = tuple(np.arange(1, len(self.arr.cluster_state.cluster_shape) + 1))
         # Our simple objective.
-        return np.sum(np.max(resources, axis=max_axes))
+        # Max over second axis, as this is the axis corresponding to resource load
+        # over cluster nodes.
+        return np.sum(np.max(resources, axis=1))
 
     def get_tnode_grid_entry(self, tnode: TreeNode):
         if tnode.parent is None:
@@ -223,7 +221,7 @@ class TreeSearch(object):
         return state.arr
 
 
-class BlockCyclicTS(TreeSearch):
+class DeviceGridTS(TreeSearch):
 
     def __init__(self,
                  seed: Union[int, np.random.RandomState] = 1337,
@@ -241,7 +239,7 @@ class BlockCyclicTS(TreeSearch):
             return state, state.objective(state.arr.cluster_state.resources), True
         action = None
         for tnode_id in state.tnode_map:
-            action = state.get_bc_action(state.tnode_map[tnode_id].node)[0]
+            action = state.get_final_action(state.tnode_map[tnode_id].node)[0]
             break
         curr_cost = state.commit_action(action)
         return state, curr_cost, False

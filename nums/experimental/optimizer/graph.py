@@ -24,6 +24,7 @@ from nums.core.storage.storage import ArrayGrid
 from nums.core.array.base import BlockArrayBase, Block
 from nums.core.array import utils as array_utils
 from nums.experimental.optimizer.clusterstate import ClusterState
+from nums.core.grid.grid import DeviceID
 
 
 def subsample(total_items, max_items, rs: np.random.RandomState):
@@ -73,10 +74,10 @@ class TreeNode(object):
     def get_actions(self, **kwargs):
         raise NotImplementedError()
 
-    def simulate_on(self, node_id, leaf_ids=None) -> np.ndarray:
+    def simulate_on(self, device_id: DeviceID, leaf_ids=None) -> np.ndarray:
         raise NotImplementedError()
 
-    def execute_on(self, node_id, leaf_ids=None, plan_only=False):
+    def execute_on(self, device_id: DeviceID, leaf_ids=None, plan_only=False):
         raise NotImplementedError()
 
     def shape(self):
@@ -209,52 +210,50 @@ class UnaryOp(TreeNode):
     def get_actions(self, **kwargs):
         actions = []
         if self.is_frontier():
-            use_all_nodes = kwargs.get("use_all_nodes", False)
-            if use_all_nodes:
-                node_ids = self.cluster_state.get_cluster_node_ids()
+            use_all_devices = kwargs.get("use_all_devices", False)
+            if use_all_devices:
+                device_ids = self.cluster_state.device_ids
             else:
-                # Restrict node ids to the nodes on which the leafs already reside.
-                node_ids = self.cluster_state.get_block_node_ids(self.child.block_id)
-            for node_id in node_ids:
-                actions.append((self.tree_node_id, {"node_id": node_id}))
+                # Restrict device ids to the nodes on which the leafs already reside.
+                device_ids = self.cluster_state.get_block_device_ids(self.child.block_id)
+            for device_id in device_ids:
+                actions.append((self.tree_node_id, {"device_id": device_id}))
         return actions
 
-    def simulate_on(self, node_id, leaf_ids=None) -> np.ndarray:
+    def simulate_on(self, device_id: DeviceID, leaf_ids=None) -> np.ndarray:
         assert leaf_ids is None
         assert isinstance(self.child, Leaf)
         resources = self.cluster_state.resources.copy()
         resources = self.cluster_state.simulate_uop(self._mem_cost(),
                                                     self.child.block_id,
-                                                    node_id,
+                                                    device_id,
                                                     resources)
         return resources
 
-    def execute_on(self, node_id, leaf_ids=None, plan_only=False) -> Leaf:
+    def execute_on(self, device_id: DeviceID, leaf_ids=None, plan_only=False) -> Leaf:
         assert leaf_ids is None
         assert isinstance(self.child, Leaf)
-        result = self._collapse(node_id, plan_only)
+        result = self._collapse(device_id, plan_only)
         new_leaf: Leaf = result[0]
         new_block: Block = result[1]
         self.cluster_state.commit_uop(self._mem_cost(),
                                       self.child.block_id,
-                                      node_id)
-        self.cluster_state.add_block(new_block, [node_id])
+                                      device_id)
+        self.cluster_state.add_block(new_block, [device_id])
         assert self.cluster_state.blocks_local(self.child.block_id, new_leaf.block_id)
         new_leaf.parent = self.parent
         if self.parent is not None:
             self.parent.update_child([self], [new_leaf])
         return new_leaf
 
-    def _collapse(self, node_id, plan_only):
+    def _collapse(self, device_id: DeviceID, plan_only):
         assert isinstance(self.child, Leaf)
         block: Block = self.cluster_state.get_block(self.child.block_id)
         op_name, args = self.op_name,  {}
-        options: dict = self.cluster_state.system.get_options(node_id,
-                                                              self.cluster_state.cluster_shape)
         if op_name == "transpose":
             block: Block = block.transpose(plan_only=plan_only)
         else:
-            block: Block = block.ufunc(op_name, options=options, plan_only=plan_only)
+            block: Block = block.ufunc(op_name, device_id=device_id, plan_only=plan_only)
         leaf: Leaf = Leaf(self.cluster_state)
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op
@@ -292,7 +291,7 @@ class BinaryOp(TreeNode):
             "tensordot": "@"
         }[self.op_name]
         return "BOp(id=%s, op=%s%s%s)" % (self.tree_node_id, str(self.left.tree_node_id),
-                                             bop_symbol, str(self.right.tree_node_id))
+                                          bop_symbol, str(self.right.tree_node_id))
 
     def get_children(self):
         return [self.left, self.right]
@@ -343,28 +342,28 @@ class BinaryOp(TreeNode):
         """
         actions = []
         if self.is_frontier():
-            use_all_nodes = kwargs.get("use_all_nodes", False)
-            if use_all_nodes:
-                node_ids = self.cluster_state.get_cluster_node_ids()
+            use_all_devices = kwargs.get("use_all_devices", False)
+            if use_all_devices:
+                device_ids = self.cluster_state.device_ids
             else:
                 # Restrict node ids to the nodes on which the leafs already reside.
-                node_ids = self.cluster_state.union_nodes(self.left.block_id, self.right.block_id)
-            for node_id in node_ids:
-                actions.append((self.tree_node_id, {"node_id": node_id}))
+                device_ids = self.cluster_state.union_devices(self.left.block_id, self.right.block_id)
+            for device_id in device_ids:
+                actions.append((self.tree_node_id, {"device_id": device_id}))
         return actions
 
-    def simulate_on(self, node_id, leaf_ids=None) -> np.ndarray:
+    def simulate_on(self, device_id: DeviceID, leaf_ids=None) -> np.ndarray:
         assert leaf_ids is None
         assert isinstance(self.left, Leaf) and isinstance(self.right, Leaf)
         resources = self.cluster_state.resources.copy()
         resources = self.cluster_state.simulate_op(self._mem_cost(),
                                                    self.left.block_id,
                                                    self.right.block_id,
-                                                   node_id,
+                                                   device_id,
                                                    resources)
         return resources
 
-    def execute_on(self, node_id, leaf_ids=None, plan_only=False) -> Leaf:
+    def execute_on(self, device_id: DeviceID, leaf_ids=None, plan_only=False) -> Leaf:
         """
         Update cluster state to reflect the cluster's load after computing this node.
         We generate a leaf node for BinaryOp, updating the leaf node's computation
@@ -372,7 +371,7 @@ class BinaryOp(TreeNode):
         """
         assert leaf_ids is None
         assert isinstance(self.left, Leaf) and isinstance(self.right, Leaf)
-        result = self._collapse(node_id, plan_only)
+        result = self._collapse(device_id, plan_only)
         new_leaf: Leaf = result[0]
         new_block: Block = result[1]
         # This updates load on nodes and channels.
@@ -382,9 +381,9 @@ class BinaryOp(TreeNode):
         self.cluster_state.commit_op(self._mem_cost(),
                                      self.left.block_id,
                                      self.right.block_id,
-                                     node_id)
+                                     device_id)
         # Update cluster state with new block.
-        self.cluster_state.add_block(new_block, [node_id])
+        self.cluster_state.add_block(new_block, [device_id])
         assert self.cluster_state.blocks_local(self.left.block_id, self.right.block_id)
         assert self.cluster_state.blocks_local(self.left.block_id, new_leaf.block_id)
         # These are mutating operations.
@@ -394,7 +393,7 @@ class BinaryOp(TreeNode):
             self.parent.update_child([self], [new_leaf])
         return new_leaf
 
-    def _collapse(self, node_id, plan_only):
+    def _collapse(self, device_id: DeviceID, plan_only):
         assert isinstance(self.left, Leaf) and isinstance(self.right, Leaf)
         lblock: Block = self.cluster_state.get_block(self.left.block_id)
         rblock: Block = self.cluster_state.get_block(self.right.block_id)
@@ -405,9 +404,8 @@ class BinaryOp(TreeNode):
         else:
             op_name, args = self.op_name,  {}
             assert array_utils.can_broadcast_shapes(lblock.shape, rblock.shape)
-        options: dict = self.cluster_state.system.get_options(node_id,
-                                                              self.cluster_state.cluster_shape)
-        block: Block = lblock.bop(op_name, rblock, args=args, options=options, plan_only=plan_only)
+        block: Block = lblock.bop(op_name, rblock, args=args,
+                                  device_id=device_id, plan_only=plan_only)
         leaf: Leaf = Leaf(self.cluster_state)
         leaf.block_id = block.id
         leaf.copy_on_op = self.copy_on_op

@@ -32,8 +32,8 @@ from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.clusterstate import ClusterState
 from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
-from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, ExhaustivePlanner, Plan
-import common
+from nums.experimental.optimizer.tree_search import RandomTS, DeviceGridTS, ExhaustivePlanner, Plan
+import conftest
 
 
 def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
@@ -120,7 +120,7 @@ def test_big_matmat(app_inst: ArrayApplication):
 
 def test_load_sqr():
     num_nodes = 5
-    app_inst = common.mock_cluster((num_nodes, 1))
+    app_inst = conftest.mock_cluster((num_nodes, 1))
     num_blocks = 5
     X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
     Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
@@ -175,7 +175,7 @@ def test_load_sqr():
 
 
 def test_load_single_block_rhs():
-    app_inst = common.mock_cluster((10, 1))
+    app_inst = conftest.mock_cluster((10, 1))
     num_blocks = 100
     X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
     Y_shape, Y_block_shape = (5, 5), (5, 5)

@@ -749,7 +749,8 @@ class ArrayApplication(object):
                                      axis=1,
                                      syskwargs={
                                          "grid_entry": (i, 0),
-                                         "grid_shape": (grid_shape[0], 1)
+                                         "grid_shape": (grid_shape[0], 1),
+                                         "options": {settings.ray_num_returns_str: 1}
                                      })
                           )
 
@@ -766,7 +767,8 @@ class ArrayApplication(object):
                                           axis=0,
                                           syskwargs={
                                               "grid_entry": (0, 0),
-                                              "grid_shape": (1, 1)
+                                              "grid_shape": (1, 1),
+                                              "options": {settings.ray_num_returns_str: 1}
                                           })
         # If blocking is "tall-skinny," then we're done.
         if R_shape != R_block_shape:

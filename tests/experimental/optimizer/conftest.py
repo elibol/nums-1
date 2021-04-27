@@ -22,14 +22,18 @@
 
 import numpy as np
 
-from nums.core.storage.storage import StoredArray
-from nums.core.systems import numpy_compute
-from nums.core.systems.systems import System, RaySystem
-from nums.core.systems.filesystem import FileSystem
-from nums.core.systems.schedulers import RayScheduler, BlockCyclicScheduler
 from nums.core.array.application import ArrayApplication, BlockArray
+from nums.core.compute import numpy_compute
+from nums.core.compute.compute_manager import ComputeManager
+from nums.core.grid.grid import DeviceGrid, CyclicDeviceGrid, DeviceID
+from nums.core.storage.storage import StoredArray
+from nums.core.systems.filesystem import FileSystem
+from nums.core.systems.system_interface import SystemInterface
+from nums.core.systems.systems import RaySystem
 from nums.experimental.optimizer.grapharray import GraphArray
 from nums.experimental.optimizer.tree_search import RandomTS
+
+import pytest
 
 
 rs = np.random.RandomState(1337)
@@ -42,7 +46,7 @@ def compute_graph_array(ga: GraphArray) -> BlockArray:
         max_reduction_pairs=1,
         force_final_action=True).solve(ga)
     result_ga.grid, result_ga.to_blocks()
-    return BlockArray(result_ga.grid, ga.cluster_state.system, result_ga.to_blocks())
+    return BlockArray(result_ga.grid, ComputeManager.instance, result_ga.to_blocks())
 
 
 def collapse_graph_array(ga: GraphArray) -> GraphArray:
@@ -66,27 +70,53 @@ def check_block_integrity(arr: BlockArray):
         assert arr.blocks[grid_entry].shape == arr.grid.get_block_shape(grid_entry)
 
 
-class MockMultiNodeScheduler(BlockCyclicScheduler):
-    # pylint: disable=abstract-method, bad-super-call
+class MockMultiNodeSystem(RaySystem):
 
-    def init(self):
-        # Intentionally calling init of grandparent class.
-        super(BlockCyclicScheduler, self).init()
-        # Replicate available nodes to satisfy cluster requirements.
-        assert len(self.available_nodes) == 1
-
-        self.available_nodes = self.available_nodes * np.prod(self.cluster_shape)
-        for i, cluster_entry in enumerate(self.get_cluster_entry_iterator()):
-            self.cluster_grid[cluster_entry] = self.available_nodes[i]
-        print("cluster_shape", self.cluster_shape)
-        print("cluster_grid", self.cluster_grid)
+    def mock_devices(self, num_nodes):
+        assert len(self._available_nodes) == 1
+        src_node = self._available_nodes[0]
+        src_node_key = self._node_key(src_node)
+        self._num_nodes = num_nodes
+        self._devices = []
+        for node_id in range(self._num_nodes):
+            # Generate distinct device ids, but map them all to the same actual node.
+            # When the function is invoked, the device id will map to the actual node.
+            did = DeviceID(node_id, src_node_key, "cpu", 1)
+            self._devices.append(did)
+            self._device_to_node[did] = src_node
 
 
 def mock_cluster(cluster_shape):
-    scheduler: RayScheduler = MockMultiNodeScheduler(compute_module=numpy_compute,
-                                                     cluster_shape=cluster_shape,
-                                                     use_head=True)
-    system: System = RaySystem(compute_module=numpy_compute,
-                               scheduler=scheduler)
+    system: MockMultiNodeSystem = MockMultiNodeSystem(use_head=True)
     system.init()
-    return ArrayApplication(system=system, filesystem=FileSystem(system))
+    system.mock_devices(np.product(cluster_shape))
+    device_grid: DeviceGrid = CyclicDeviceGrid(cluster_shape, "cpu", system.devices())
+    cm = ComputeManager.create(system, numpy_compute, device_grid)
+    fs = FileSystem(cm)
+    return ArrayApplication(cm, fs)
+
+
+def destroy_mock_cluster(app: ArrayApplication):
+    app.cm.system.shutdown()
+    ComputeManager.destroy()
+
+
+@pytest.fixture(scope="function", params=[(1, 1)])
+def app_inst_mock_none(request):
+    app_inst = mock_cluster(request.param)
+    yield app_inst
+    destroy_mock_cluster(app_inst)
+
+
+@pytest.fixture(scope="function", params=[(10, 1)])
+def app_inst_mock_big(request):
+    app_inst = mock_cluster(request.param)
+    yield app_inst
+    destroy_mock_cluster(app_inst)
+
+
+@pytest.fixture(scope="function", params=[(4, 1)])
+def app_inst_mock_small(request):
+    app_inst = mock_cluster(request.param)
+    yield app_inst
+    destroy_mock_cluster(app_inst)

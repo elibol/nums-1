@@ -70,7 +70,7 @@ class RaySystem(SystemInterface):
 
     def __init__(self, use_head=False, num_nodes=None):
         self.use_head = use_head
-        self.num_nodes = num_nodes
+        self._num_nodes = num_nodes
         self._manage_ray = True
         self._remote_functions = {}
         self._available_nodes = []
@@ -103,14 +103,16 @@ class RaySystem(SystemInterface):
             total_cpus += self._head_node["Resources"]["CPU"]
             self._available_nodes.append(self._head_node)
         logging.getLogger().info("total cpus %s", total_cpus)
+
+        if self._num_nodes is None:
+            self._num_nodes = len(self._available_nodes)
+        assert self._num_nodes <= len(self._available_nodes)
+
         self.init_devices()
 
     def init_devices(self):
         self._devices = []
-        if self.num_nodes is None:
-            self.num_nodes = len(self._available_nodes)
-        assert self.num_nodes <= len(self._available_nodes)
-        for node_id in range(self.num_nodes):
+        for node_id in range(self._num_nodes):
             node = self._available_nodes[node_id]
             did = DeviceID(node_id, self._node_key(node), "cpu", 1)
             self._devices.append(did)

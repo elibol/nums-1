@@ -25,24 +25,19 @@ import time
 
 import numpy as np
 
-from nums.core.systems.systems import System, SerialSystem, RaySystem
-from nums.core.systems.schedulers import RayScheduler, TaskScheduler, BlockCyclicScheduler
+from nums.core.systems.systems import RaySystem
 from nums.core.array.application import ArrayApplication, BlockArray
 from nums.core.array.base import BlockArrayBase
 
 from nums.experimental.optimizer.clusterstate import ClusterState
 from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf
-from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS
-import common
+from nums.experimental.optimizer.tree_search import RandomTS, DeviceGridTS
+import conftest
 
 
 def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
                         copy_on_op=True) -> BlockArray:
-    system: System = lhs.system
-    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
-        cluster_state = ClusterState(system.scheduler.cluster_shape, system)
-    else:
-        cluster_state = ClusterState((1,), system)
+    cluster_state: ClusterState = ClusterState(lhs.cm.devices())
     lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state, copy_on_op=copy_on_op)
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=copy_on_op)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
@@ -50,7 +45,7 @@ def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
     print("*"*50)
     print("op grid shape", tensordot_ga.grid.grid_shape)
     result_ga: GraphArray = RandomTS(
-        seed=common.rs,
+        seed=conftest.rs,
         max_samples_per_step=1,
         max_reduction_pairs=1,
         force_final_action=True).solve(tensordot_ga)
@@ -60,67 +55,66 @@ def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
     print("net_in", cluster_state.resources[1])
     print("net_out", cluster_state.resources[2])
     print("*"*50)
-    return BlockArray(result_ga.grid, system, result_ga.to_blocks())
+    return BlockArray(result_ga.grid, lhs.cm, result_ga.to_blocks())
 
 
-def test_matvec(app_inst: ArrayApplication):
+def test_matvec(app_inst_mock_none):
+    app = app_inst_mock_none
     A_shape, A_block_shape = (5, 10), (5, 5)
     x_shape, x_block_shape = (10, 1), (5, 1)
     real_A = np.random.random(np.product(A_shape)).reshape(A_shape)
     real_x = np.random.random(np.product(x_shape)).reshape(x_shape)
-    A: BlockArray = app_inst.array(real_A, A_block_shape)
-    x: BlockArray = app_inst.array(real_x, x_block_shape)
+    A: BlockArray = app.array(real_A, A_block_shape)
+    x: BlockArray = app.array(real_x, x_block_shape)
     result: BlockArray = A @ x
     opt_result: BlockArray = optimized_tensordot(A, x, axes=1)
     assert np.allclose(result.get(), real_A @ real_x)
-    assert app_inst.allclose(result, opt_result).get()
+    assert app.allclose(result, opt_result).get()
 
 
-def test_matmat(app_inst: ArrayApplication):
+def test_matmat(app_inst_mock_none):
+    app = app_inst_mock_none
     X_shape, X_block_shape = (5, 10), (5, 5)
     Y_shape, Y_block_shape = (10, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
     Z: BlockArray = X @ Y
     opt_Z: BlockArray = optimized_tensordot(X, Y, axes=1)
     assert np.allclose(Z.get(), real_X @ real_Y)
-    assert app_inst.allclose(Z, opt_Z).get()
+    assert app.allclose(Z, opt_Z).get()
 
 
-def test_big_matmat(app_inst: ArrayApplication):
+def test_big_matmat(app_inst_mock_none):
+    app = app_inst_mock_none
     num_blocks = 10**3
     X_shape, X_block_shape = (5, 5*num_blocks), (5, 5)
     Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
     Z: BlockArray = X @ Y
     t = time.time()
     opt_Z: BlockArray = optimized_tensordot(X, Y, axes=1)
     print(time.time()-t)
     assert np.allclose(Z.get(), real_X @ real_Y)
-    assert app_inst.allclose(Z, opt_Z).get()
+    assert app.allclose(Z, opt_Z).get()
 
 
-def test_load_sqr():
-    app_inst = common.mock_cluster((10, 1))
+def test_load_sqr(app_inst_mock_big):
+    app = app_inst_mock_big
     num_blocks = 100
     X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
     Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
 
     lhs, rhs, axes = X.T, Y, 1
-    system: System = lhs.system
-    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
-        cluster_state: ClusterState = ClusterState(system.scheduler.cluster_shape, system)
-    else:
-        cluster_state: ClusterState = ClusterState((1,), system)
+    cluster_state: ClusterState = ClusterState(app.cm.devices())
     lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state)
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
@@ -152,22 +146,18 @@ def test_load_sqr():
     print(mem_diff, net_in_diff, net_out_diff)
 
 
-def test_load_single_block_rhs():
-    app_inst = common.mock_cluster((10, 1))
+def test_load_single_block_rhs(app_inst_mock_big):
+    app = app_inst_mock_big
     num_blocks = 100
     X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
     Y_shape, Y_block_shape = (5, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
 
     lhs, rhs, axes = X, Y, 1
-    system: System = lhs.system
-    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
-        cluster_state: ClusterState = ClusterState(system.scheduler.cluster_shape, system)
-    else:
-        cluster_state: ClusterState = ClusterState((1,), system)
+    cluster_state: ClusterState = ClusterState(app.cm.devices())
     lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state)
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
@@ -199,11 +189,15 @@ def test_load_single_block_rhs():
 
 
 if __name__ == "__main__":
-    from tests import conftest
+    import conftest
 
-    app_inst = conftest.get_app("serial")
-    test_matvec(app_inst)
-    test_matmat(app_inst)
-    test_big_matmat(app_inst)
-    test_load_sqr()
-    test_load_single_block_rhs()
+    app = conftest.mock_cluster((1, 1))
+    test_matvec(app)
+    test_matmat(app)
+    test_big_matmat(app)
+    conftest.destroy_mock_cluster(app)
+
+    app = conftest.mock_cluster((10, 1))
+    test_load_sqr(app)
+    test_load_single_block_rhs(app)
+    conftest.destroy_mock_cluster(app)
