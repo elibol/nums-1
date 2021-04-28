@@ -621,28 +621,29 @@ class BlockArray(BlockArrayBase):
         Implements fast scheduling for basic element-wise operations.
         """
         # Schedule the op first.
-        blocks = np.empty(shape=self.grid.grid_shape, dtype=Block)
-        for grid_entry in self.grid.get_entry_iterator():
-            self_block: Block = self.blocks[grid_entry]
-            other_block: Block = other.blocks[grid_entry]
-            blocks[grid_entry] = block = Block(grid_entry=grid_entry,
-                                               grid_shape=self_block.grid_shape,
-                                               rect=self_block.rect,
-                                               shape=self_block.shape,
-                                               dtype=self_block.dtype,
-                                               transposed=False,
-                                               cm=self.cm)
-            block.oid = self.cm.bop(op_name,
-                                    self_block.oid,
-                                    other_block.oid,
-                                    self_block.transposed,
-                                    other_block.transposed,
-                                    axes={},
-                                    syskwargs={
-                                        "grid_entry": grid_entry,
-                                        "grid_shape": self.grid.grid_shape
-                                    })
-        return BlockArray(self.grid.copy(), self.cm, blocks=blocks)
+        # blocks = np.empty(shape=self.grid.grid_shape, dtype=Block)
+        # for grid_entry in self.grid.get_entry_iterator():
+        #     self_block: Block = self.blocks[grid_entry]
+        #     other_block: Block = other.blocks[grid_entry]
+        #     blocks[grid_entry] = block = Block(grid_entry=grid_entry,
+        #                                        grid_shape=self_block.grid_shape,
+        #                                        rect=self_block.rect,
+        #                                        shape=self_block.shape,
+        #                                        dtype=self_block.dtype,
+        #                                        transposed=False,
+        #                                        cm=self.cm)
+        #     block.oid = self.cm.bop(op_name,
+        #                             self_block.oid,
+        #                             other_block.oid,
+        #                             self_block.transposed,
+        #                             other_block.transposed,
+        #                             axes={},
+        #                             syskwargs={
+        #                                 "grid_entry": grid_entry,
+        #                                 "grid_shape": self.grid.grid_shape
+        #                             })
+        # TODO: Note this currently only does add.
+        return BlockArray(self.grid.copy(), self.cm, blocks=self.blocks + other.blocks)
 
     def __add__(self, other):
         other = self.check_or_convert_other(other)
