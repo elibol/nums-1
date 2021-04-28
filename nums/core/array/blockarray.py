@@ -405,9 +405,9 @@ class BlockArray(BlockArrayBase):
                                             keepdims=keepdims,
                                             transposed=block.transposed,
                                             syskwargs={
-                                                    "grid_entry": block.grid_entry,
-                                                    "grid_shape": block.grid_shape
-                                                })
+                                                "grid_entry": block.grid_entry,
+                                                "grid_shape": block.grid_shape
+                                            })
             block_reduced_oids[grid_entry] = (block_oid, block.grid_entry, block.grid_shape, False)
         result_shape = []
         result_block_shape = []
@@ -505,9 +505,9 @@ class BlockArray(BlockArrayBase):
                                              other_block.transposed,
                                              axes=axes,
                                              syskwargs={
-                                                     "grid_entry": dot_grid_args[0],
-                                                     "grid_shape": dot_grid_args[1]
-                                                 })
+                                                 "grid_entry": dot_grid_args[0],
+                                                 "grid_shape": dot_grid_args[1]
+                                             })
                     sum_oids.append((dotted_oid,
                                      dot_grid_args[0],
                                      dot_grid_args[1],
@@ -560,9 +560,9 @@ class BlockArray(BlockArrayBase):
                                   a2_T=other_block.transposed,
                                   axes=1,
                                   syskwargs={
-                                          "grid_entry": sch_grid_entry,
-                                          "grid_shape": sch_grid_shape
-                                      })
+                                      "grid_entry": sch_grid_entry,
+                                      "grid_shape": sch_grid_shape
+                                  })
             oids.append((dot_oid, sch_grid_entry, sch_grid_shape, False))
         result_grid_entry = tuple(0 for _ in range(len(result.grid.grid_shape)))
         result_oid = self._tree_reduce("sum", oids,
@@ -606,9 +606,9 @@ class BlockArray(BlockArrayBase):
                                       a2_T=other_block.transposed,
                                       axes=1,
                                       syskwargs={
-                                              "grid_entry": sch_grid_entry,
-                                              "grid_shape": sch_grid_shape
-                                          })
+                                          "grid_entry": sch_grid_entry,
+                                          "grid_shape": sch_grid_shape
+                                      })
                 row.append((dot_oid, sch_grid_entry, sch_grid_shape, False))
             result_oid = self._tree_reduce("sum", row,
                                            result_grid_entry,
@@ -616,8 +616,29 @@ class BlockArray(BlockArrayBase):
             result.blocks[result_grid_entry].oid = result_oid
         return result
 
+    def _fast_element_wise(self, op_name, other):
+        """
+        Implements fast scheduling for basic element-wise operations.
+        """
+        # Schedule the op first.
+        r: BlockArray = BlockArray(self.grid.copy(), self.cm)
+        for grid_entry in self.grid.get_entry_iterator():
+            r.blocks[grid_entry].oid = self.cm.bop(op_name,
+                                                   self.blocks[grid_entry].oid,
+                                                   other.blocks[grid_entry].oid,
+                                                   self.blocks[grid_entry].transposed,
+                                                   other.blocks[grid_entry].transposed,
+                                                   axes={},
+                                                   syskwargs={
+                                                       "grid_entry": grid_entry,
+                                                       "grid_shape": r.grid.grid_shape
+                                                   })
+        return r
+
     def __add__(self, other):
         other = self.check_or_convert_other(other)
+        if self.shape == other.shape:
+            return self._fast_element_wise("add", other)
         return BlockArray.from_blocks(self.blocks + other.blocks,
                                       result_shape=None,
                                       cm=self.cm)
@@ -833,9 +854,9 @@ class Reshape(object):
                 index_pairs = src_blocks[src_grid_entry]
                 syskwargs = {"grid_entry": dst_grid_entry, "grid_shape": dst_arr.grid.grid_shape}
                 dst_block.oid = cm.update_block_by_index(dst_block.oid,
-                                                             src_block.oid,
-                                                             index_pairs,
-                                                             syskwargs=syskwargs)
+                                                         src_block.oid,
+                                                         index_pairs,
+                                                         syskwargs=syskwargs)
         return dst_arr
 
     def _block_shape_reshape(self, arr, block_shape):
