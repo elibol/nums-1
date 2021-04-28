@@ -356,11 +356,12 @@ class Plan(object):
 
 
 class SubtreeRoot:
-    def __init__(self, id, state: ProgramState, cost, plan: Plan):
+    def __init__(self, id, state: ProgramState, cost, plan: Plan, depth):
         self.id = id
         self.state = state
         self.cost = cost
         self.plan = plan
+        self.depth = depth
 
 
 class ExhaustiveProcess(multiprocessing.Process):
@@ -380,7 +381,7 @@ class ExhaustiveProcess(multiprocessing.Process):
         for start_point in self.start_points:
             plans = []
             planner = ExhaustivePlanner(self.nprocs)
-            planner.make_plan_helper(start_point.state, start_point.cost, start_point.plan, plans) #or make plan?
+            planner.make_plan_helper(start_point.state, start_point.cost, start_point.depth, start_point.plan, plans) #or make plan?
             self.queue.put(plans)
         # self.all_plans[str(self.thread_id)] = plans
 #        print("Exiting ", self.thread_id)
@@ -449,7 +450,7 @@ class ExhaustivePlanner(object):
             states.append(next_state)
             costs.append(step_cost)
             if not unroll:
-                subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan))
+                subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan, 1))
 
         # Second layer: create processes for sets of paths.
         processes = []
@@ -474,7 +475,7 @@ class ExhaustivePlanner(object):
                                      step_cost,
                                      next_state.arr.cluster_state,
                                      is_done)
-                    subtrees.append(SubtreeRoot(subtree_id, next_state, step_cost + costs[i], next_plan))
+                    subtrees.append(SubtreeRoot(subtree_id, next_state, step_cost + costs[i], next_plan, 2))
                     subtree_id += 1
 
         # Round robin pickup of tasks
@@ -561,7 +562,7 @@ class ExhaustivePlanner(object):
     def make_plan(self, state: ProgramState):
         # Generate + save all possible plans and their associated costs
         all_plans = []
-        self.make_plan_helper(state, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
+        self.make_plan_helper(state, 0, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
         # Find minimum cost plan 
         self.find_best_and_worst_plans(all_plans)
         return all_plans
@@ -569,7 +570,7 @@ class ExhaustivePlanner(object):
     # Helper to make_plan: recursively generates all possible plans while tracking
     # cumulative cost.
     # all_plans: array of (Plan, int cost)
-    def make_plan_helper(self, state: ProgramState, cost, plan: Plan, all_plans):
+    def make_plan_helper(self, state: ProgramState, cost, depth, plan: Plan, all_plans):
         # hack for debugging
 #        if len(all_plans) > 0:
 #            return
@@ -582,7 +583,7 @@ class ExhaustivePlanner(object):
 
         # Base case: if no actions, return plan and cost
         if len(actions) == 0:
-#            print("encountered base case")
+            print("encountered base case, depth", depth)
             all_plans.append((plan, cost))
             return
 
@@ -599,7 +600,7 @@ class ExhaustivePlanner(object):
             step_cost = next_state.commit_action(a)
             is_done = len(next_state.tnode_map) == 0
             next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
-            self.make_plan_helper(next_state, cost + step_cost, next_plan, all_plans)
+            self.make_plan_helper(next_state, cost + step_cost, depth + 1, next_plan, all_plans)
 #        print("----")
 
     def get_frontier_actions(self, state: ProgramState):
