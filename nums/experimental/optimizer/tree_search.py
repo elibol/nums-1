@@ -20,7 +20,6 @@ import pickle
 import dill
 import multiprocessing
 import time
-import math
 
 from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
 from nums.experimental.optimizer.cluster_sim import ClusterState
@@ -607,6 +606,9 @@ class ExhaustivePlanner(object):
 #        if len(all_plans) > 0:
 #            return
 
+        if min_cost is not None and cost > min_cost:
+            return min_cost
+
         # Get all actions possible from current frontier.
         actions = self.get_frontier_actions(state)
 #        print("make_plan_helper actions", actions)
@@ -617,7 +619,9 @@ class ExhaustivePlanner(object):
         if len(actions) == 0:
             print("encountered base case, depth", depth)
             all_plans.append((plan, cost))
-            return
+            if min_cost is None or cost < min_cost:
+                min_cost = cost
+            return min_cost
 
         # For each action, construct a new ProgramState that takes
         # that action at this step. 
@@ -632,8 +636,9 @@ class ExhaustivePlanner(object):
             step_cost = next_state.commit_action(a)
             is_done = len(next_state.tnode_map) == 0
             next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
-            self.make_plan_helper(next_state, cost + step_cost, depth + 1, next_plan, all_plans)
+            min_cost = self.make_plan_helper(next_state, cost + step_cost, depth + 1, next_plan, all_plans, min_cost)
 #        print("----")
+        return min_cost
 
     def get_frontier_actions(self, state: ProgramState):
         # Get all frontier nodes.
