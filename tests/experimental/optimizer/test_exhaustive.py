@@ -36,7 +36,6 @@ from nums.experimental.optimizer.comp_graph import GraphArray, TreeNode, BinaryO
 from nums.experimental.optimizer.tree_search import RandomTS, BlockCyclicTS, ExhaustivePlanner, ExhaustiveProcess, Plan
 import common
 
-
 def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
                         copy_on_op=True) -> BlockArray:
     system: System = lhs.system
@@ -159,7 +158,7 @@ def test_load_sqr():
     assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
 
     # Run exhaustive planner, print details of best and worst plans.
-    planner: ExhaustivePlanner = ExhaustivePlanner(20)
+    planner: ExhaustivePlanner = ExhaustivePlanner(8)
     all_plans = planner.solve(tensordot_ga)
     plan: Plan = planner.plan
 
