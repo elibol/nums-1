@@ -383,7 +383,7 @@ class ExhaustiveProcess(multiprocessing.Process):
             plans = []
             planner = ExhaustivePlanner(self.nprocs)
             t0 = time.time()
-            planner.make_plan_helper(start_point.state, start_point.cost, start_point.depth, start_point.plan, plans) #or make plan?
+            planner.make_plan_helper(start_point.state, start_point.cost, start_point.depth, start_point.plan, plans, None) #or make plan?
             t1 = time.time()
             self.ts_queue.put((t1-t0, len(plans)))
             search_time += (t1 - t0)
@@ -593,7 +593,7 @@ class ExhaustivePlanner(object):
     def make_plan(self, state: ProgramState):
         # Generate + save all possible plans and their associated costs
         all_plans = []
-        self.make_plan_helper(state, 0, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans) 
+        self.make_plan_helper(state, 0, 0, Plan(self.max_reduction_pairs, self.force_final_action), all_plans, None) 
         # Find minimum cost plan 
         self.find_best_and_worst_plans(all_plans)
         return all_plans
@@ -601,7 +601,7 @@ class ExhaustivePlanner(object):
     # Helper to make_plan: recursively generates all possible plans while tracking
     # cumulative cost.
     # all_plans: array of (Plan, int cost)
-    def make_plan_helper(self, state: ProgramState, cost, depth, plan: Plan, all_plans):
+    def make_plan_helper(self, state: ProgramState, cost, depth, plan: Plan, all_plans, min_cost):
         # hack for debugging
 #        if len(all_plans) > 0:
 #            return
@@ -617,7 +617,7 @@ class ExhaustivePlanner(object):
 
         # Base case: if no actions, return plan and cost
         if len(actions) == 0:
-            print("encountered base case, depth", depth)
+#            print("encountered base case, depth", depth)
             all_plans.append((plan, cost))
             if min_cost is None or cost < min_cost:
                 min_cost = cost
