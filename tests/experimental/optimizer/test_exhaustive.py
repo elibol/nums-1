@@ -124,9 +124,9 @@ def test_load_sqr():
     #   for X @ Y.
     num_nodes = 5
     app_inst = common.mock_cluster((num_nodes, 1))
-    num_blocks = 5
-    X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
-    Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
+    num_blocks = 6
+    X_shape, X_block_shape = (6*num_blocks, 5), (5, 5)
+    Y_shape, Y_block_shape = (6*num_blocks, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
     X: BlockArray = app_inst.array(real_X, X_block_shape)
@@ -150,7 +150,7 @@ def test_load_sqr():
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
     net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
     net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
-    assert mem_diff == net_in_diff == net_out_diff == 0
+#    assert mem_diff == net_in_diff == net_out_diff == 0
     # Block-cyclic distribution of 100 blocks of size 25 over 10 nodes == 10*25 == 250
     # We have 2 such matrices, so expect initial memory to be 500.
     print(cluster_state.resources)
@@ -160,6 +160,17 @@ def test_load_sqr():
     # Run exhaustive planner, print details of best and worst plans.
     planner: ExhaustivePlanner = ExhaustivePlanner(8)
     all_plans = planner.solve(tensordot_ga)
+#    planner: ExhaustivePlanner = ExhaustivePlanner(16)
+    print("16 threads")
+#    all_plans = planner.solve(tensordot_ga)
+#    p2 = ExhaustivePlanner(8)
+#    p2.solve(tensordot_ga)
+    p3 = ExhaustivePlanner(4)
+    p3.solve(tensordot_ga)
+#    p4 = ExhaustivePlanner(2)
+#    p4.solve(tensordot_ga)
+#    p5 = ExhaustivePlanner(1)
+#    p5.solve(tensordot_ga)
     plan: Plan = planner.plan
 
     print("Executing plan: ", plan.get_plan_actions())
