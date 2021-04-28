@@ -365,12 +365,13 @@ class SubtreeRoot:
 
 
 class ExhaustiveProcess(multiprocessing.Process):
-    def __init__(self, thread_id, start_points, queue, nprocs):
+    def __init__(self, thread_id, start_points, queue, nprocs, timestamp_queue):
         multiprocessing.Process.__init__(self)
         self.thread_id = thread_id
         self.queue = queue
         self.nprocs = nprocs
         self.start_points = start_points
+        self.ts_queue = timestamp_queue
 
     def add_subtree(self, subtree):
         self.start_points.append(subtree)
@@ -378,11 +379,17 @@ class ExhaustiveProcess(multiprocessing.Process):
     def run(self):
         print("Starting ", self.thread_id, "with", len(self.start_points), "subtrees")
         print("Subtrees: {}".format(",".join([str(x.id) for x in self.start_points])))
+        search_time = 0
         for start_point in self.start_points:
             plans = []
             planner = ExhaustivePlanner(self.nprocs)
+            t0 = time.time()
             planner.make_plan_helper(start_point.state, start_point.cost, start_point.depth, start_point.plan, plans) #or make plan?
+            t1 = time.time()
+            self.ts_queue.put((t1-t0, len(plans)))
+            search_time += (t1 - t0)
             self.queue.put(plans)
+        # self.ts_queue.put(search_time)
         # self.all_plans[str(self.thread_id)] = plans
 #        print("Exiting ", self.thread_id)
 
@@ -418,6 +425,7 @@ class ExhaustivePlanner(object):
     def make_plan_parallel_unroll(self, state: ProgramState):
         # Make a thread for each exhaustive process
         q = multiprocessing.Queue()
+        ts_queue = multiprocessing.Queue()
         actions = self.get_frontier_actions(state)
 
         unroll = True
@@ -481,7 +489,7 @@ class ExhaustivePlanner(object):
         # Round robin pickup of tasks
         for i in range(len(subtrees)):
             if i < self.nprocs:
-                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs))
+                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs, ts_queue))
             else:
                 processes[i % self.nprocs].add_subtree(subtrees[i])
 
@@ -493,14 +501,25 @@ class ExhaustivePlanner(object):
         # print("proc plans length:", len(proc_plans))
         items = len(subtrees)
         while items > 0:
-            print("Picked up plans from queue. {}/{}".format((len(subtrees) - items) + 1, len(subtrees)))
-            items -= 1
-            all_plans += q.get()
+            if not q.empty():
+                print("Picked up plans from queue. {}/{}".format((len(subtrees) - items) + 1, len(subtrees)))
+                items -= 1
+                all_plans += q.get()
+
+        search_times = []
+        times = len(subtrees)
+        while times > 0:
+            times -= 1
+            search_times.append(ts_queue.get())
 
         print("Waiting for all processes to join")
         for p in processes:
             p.join()
         print("All joined")
+
+        for ts, length in search_times:
+            print("Time spent on search:", ts)
+            print("Plans found:", length)
 
         # Find minimum cost plan
         self.find_best_and_worst_plans(all_plans)
@@ -509,6 +528,7 @@ class ExhaustivePlanner(object):
     def make_plan_parallel(self, state: ProgramState):
         # Make a thread for each exhaustive planner object
         q = multiprocessing.Queue()
+        ts_queue = multiprocessing.Queue()
         actions = self.get_frontier_actions(state)
         # proc_plans = {}
         processes = []
@@ -530,14 +550,15 @@ class ExhaustivePlanner(object):
             # processes.append(ExhaustiveProcess(i, next_state, step_cost, next_plan, q, self.nprocs))
             subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan))
 
-        # Round robin pick up of tasks
-        print("Number of first actions:", len(actions))
-        for i in range(len(actions)):
-            if i < self.nprocs:
-                processes.append(ExhaustiveProcess(i, [start_nodes[i]], q, self.nprocs))
-            else:
-                processes[i % self.nprocs].add_subtree(start_nodes[i])
 
+        # Round robin pickup of tasks
+        for i in range(len(subtrees)):
+            if i < self.nprocs:
+                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs, ts_queue))
+            else:
+                processes[i % self.nprocs].add_subtree(subtrees[i])
+
+        # Run all processes.
         for p in processes:
             p.start()
 
@@ -545,14 +566,25 @@ class ExhaustivePlanner(object):
         # print("proc plans length:", len(proc_plans))
         items = len(subtrees)
         while items > 0:
-            print("Picked up plans from queue. {}/{}".format((len(subtrees) - items) + 1, len(subtrees)))
-            items -= 1
-            all_plans += q.get()
+            if not q.empty():
+                print("Picked up plans from queue. {}/{}".format((len(subtrees) - items) + 1, len(subtrees)))
+                items -= 1
+                all_plans += q.get()
+
+        search_times = []
+        times = len(subtrees)
+        while times > 0:
+            times -= 1
+            search_times.append(ts_queue.get())
 
         print("Waiting for all processes to join")
         for p in processes:
             p.join()
         print("All joined")
+
+        for ts, length in search_times:
+            print("Time spent on search:", ts)
+            print("Plans found:", length)
 
         # Find minimum cost plan
         self.find_best_and_worst_plans(all_plans)
