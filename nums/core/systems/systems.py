@@ -89,6 +89,9 @@ class RaySystem(SystemInterface):
         total_cpus = 0
         nodes = ray.nodes()
         for node in nodes:
+            if 'Alive' in node and node['Alive'] is False: # due to a bug in ray.nodes()
+                continue
+
             node_ip = self._node_ip(node)
             if local_ip == node_ip:
                 # TODO (hme): The driver node is not necessarily the head node.
