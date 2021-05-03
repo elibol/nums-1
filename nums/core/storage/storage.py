@@ -89,7 +89,12 @@ class StoredArray(object):
 class StoredArrayS3(StoredArray):
 
     def __init__(self, filename: str, grid: ArrayGrid = None):
-        self.client = boto3.client('s3')
+        session = boto3.Session()
+        self.client = boto3.client('s3',
+            aws_access_key_id=session.get_credentials().access_key,
+            aws_secret_access_key=session.get_credentials().secret_key,
+            aws_session_token=session.get_credentials().token
+        )
         super(StoredArrayS3, self).__init__(filename, grid)
         if self.filename[0] == "/":
             raise Exception("Leading / in s3 filename: %s" % filename)
