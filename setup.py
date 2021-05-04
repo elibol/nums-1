@@ -18,7 +18,7 @@ from setuptools import setup, find_packages
 
 
 requirements = [
-    'numpy>1.18.0,<=1.20.0',
+    'numpy==1.19.4',
     'ray==1.3.0',
     'scipy',
     'boto3'
