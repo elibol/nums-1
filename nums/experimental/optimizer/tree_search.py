@@ -16,14 +16,18 @@
 
 from typing import Union
 import numpy as np
+import pickle
 import dill
 import multiprocessing
 import time
 
 from nums.experimental.optimizer.grapharray import GraphArray, TreeNode, BinaryOp, ReductionOp, Leaf, UnaryOp
+#from nums.experimental.optimizer.graph import TreeNode, BinaryOp, Leaf, UnaryOp
+#from nums.experimental.optimizer.grapharray import GraphArray
+#from nums.experimental.optimizer.reduction_ops import ReductionOp
 from nums.experimental.optimizer.clusterstate import ClusterState
 from nums.core.compute.compute_manager import ComputeManager
-
+   
 random_state = np.random.RandomState(1337)
 
 
@@ -47,13 +51,11 @@ class ProgramState(object):
                  max_reduction_pairs=None,
                  force_final_action=True,
                  unique_reduction_pairs=False,
-                 plan_only=False,
-                 use_all_devices=False):
+                 plan_only=False):
         self.arr: GraphArray = arr
         self.force_final_action = force_final_action
         self.get_action_kwargs = {"max_reduction_pairs": max_reduction_pairs,
-                                  "unique_reduction_pairs": unique_reduction_pairs,
-                                  "use_all_devices": use_all_devices}
+                                  "unique_reduction_pairs": unique_reduction_pairs}
         self.plan_only = plan_only
         # Keys are tree_node_id
         # Values are a 2-tuple corresponding to the actual tree node and the actions that can
@@ -103,10 +105,9 @@ class ProgramState(object):
         if self.force_final_action and tnode.parent is None:
             if isinstance(tnode, (BinaryOp, UnaryOp)) or (isinstance(tnode, ReductionOp)
                                                           and len(tnode.children_dict) == 2):
-                # This is a root frontier op.
+                # This is a root frontier binary op or reduction op with 2 children.
                 # The next action is the last action,
-                # so intercept action to force computation on device
-                # to satisfy device placement assumptions.
+                # so intercept action to force computation on root node entry.
                 actions = self.get_final_action(tnode)
         if actions is None:
             actions = tnode.get_actions(**self.get_action_kwargs)
@@ -126,18 +127,25 @@ class ProgramState(object):
         # The frontier needs to be updated, so remove the current node from frontier.
         del self.tnode_map[tnode_id]
         if old_node.parent is None and old_node is not new_node:
+#            print("We operated on a root node:", old_node, new_node)
             # We operated on a root node, so update the array.
             self.update_root(old_node, new_node)
         if isinstance(new_node, Leaf):
+#            print("New node is a leaf:", old_node, new_node)
             # If it's a leaf node, its parent may now be a frontier node.
             new_node_parent: TreeNode = new_node.parent
+#            if new_node_parent is not None:
+#                print(">>>> has a parent:", new_node_parent)
             if new_node_parent is not None and new_node_parent.is_frontier():
+#                print(">>>> parent is frontier node")
                 self.add_frontier_node(new_node_parent)
         else:
             # There's still work that needs to be done to compute this node.
             # Add the returned node to the frontier.
             # Either a BinaryOp or ReductionOp.
+#            print("Still have work to compute node:", old_node, new_node)
             if new_node.is_frontier():
+#                print(">>>> new node is frontier")
                 self.add_frontier_node(new_node)
         # That's it. This program state is now updated.
         return self.objective(self.arr.cluster_state.resources)
@@ -150,9 +158,8 @@ class ProgramState(object):
         return self.objective(new_resources)
 
     def objective(self, resources):
+#        max_axes = tuple(np.arange(1, len(self.arr.cluster_state.cluster_shape) + 1))
         # Our simple objective.
-        # Max over second axis, as this is the axis corresponding to resource load
-        # over cluster nodes.
         return np.sum(np.max(resources, axis=1))
 
     def get_tnode_grid_entry(self, tnode: TreeNode):
@@ -351,6 +358,7 @@ class Plan(object):
 
         return state.arr
 
+
 class SubtreeRoot:
     def __init__(self, id, state: ProgramState, cost, plan: Plan, depth):
         self.id = id
@@ -392,11 +400,13 @@ class ExhaustiveProcess(multiprocessing.Process):
 
 class ExhaustivePlanner(object):
     
-    def __init__(self, nprocs, force_final_action=True):
+    def __init__(self, nprocs, unroll=True, prune=True, force_final_action=True):
         # To ensure a fully exhaustive search, want to allow reduction nodes
         # to consider all pairs of incoming vertices. 
         self.max_reduction_pairs = None
         self.nprocs = nprocs
+        self.unroll = unroll
+        self.prune = prune
         self.force_final_action = force_final_action
         self.plan = Plan(self.max_reduction_pairs, force_final_action)
         self.pessimal_plan = Plan(self.max_reduction_pairs, force_final_action)
@@ -415,8 +425,8 @@ class ExhaustivePlanner(object):
                 max_cost = p[1]
                 self.pessimal_plan = p[0]
                 self.pessimal_plan.cost = p[1]
-        print("Chosen plan: ", self.plan, self.plan.cost)
-        print("Worst plan: ", self.pessimal_plan, self.pessimal_plan.cost)
+        print("Chosen plan: ", self.plan.get_plan_actions(), self.plan.cost)
+        print("Worst plan: ", self.pessimal_plan.get_plan_actions(), self.pessimal_plan.cost)
 
     def make_plan_parallel_unroll(self, state: ProgramState):
         # Make a thread for each exhaustive process
@@ -603,7 +613,7 @@ class ExhaustivePlanner(object):
 #        if len(all_plans) > 0:
 #            return
 
-        if min_cost is not None and cost > min_cost:
+        if self.prune and min_cost is not None and cost > min_cost:
             return min_cost
 
         # Get all actions possible from current frontier.
@@ -655,10 +665,13 @@ class ExhaustivePlanner(object):
                                            force_final_action=self.force_final_action,
                                            plan_only=True)
         t0 = time.time()
+        # TODO: add if/else caluse for our pruning.
         if self.nprocs == 1:
             all_plans = self.make_plan(state)
-        else:
+        elif self.unroll:
             all_plans = self.make_plan_parallel_unroll(state)
+        else:
+            all_plans = self.make_plan_parallel(state)
         t1 = time.time()
         print("Time to make plan:", t1-t0)
         return all_plans
@@ -720,6 +733,7 @@ class RandomPlan(object):
         tree_node: TreeNode = state.tnode_map[action[0]].node
         cluster_state = state.arr.cluster_state.copy()
         cost = state.commit_action(action)
+        self.plan.cost += cost
         next_cluster_state = state.arr.cluster_state.copy()
         is_done = len(state.tnode_map) == 0
 

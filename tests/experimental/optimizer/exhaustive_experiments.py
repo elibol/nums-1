@@ -49,77 +49,82 @@ def traverse(ga: GraphArray):
                 continue
             remaining.append(c)
 
-def test_block_sum():
+def test_serial_no_pruning():
     import conftest 
     grapharray.rop_cls = ReductionOp
-    # Square matrix, square cluster shape, block sum problem. 
-    # Force blocks to be distributed (cyclically?) over compute nodes:
-    # grid shape = k * cluster shape
-    # block shape = elementwise matrix shape / grid shape.
-    cluster_shape = (2, 2)
-    grid_shape = tuple(2*np.array(cluster_shape))
-    matrix_shape = tuple(2*np.array(grid_shape))
-    block_shape = tuple(np.ceil((np.array(matrix_shape) / np.array(grid_shape))).astype(int).tolist())
 
-    print("cluster shape:", cluster_shape)
-    print("matrix shape:", matrix_shape)
-    print("grid shape:", grid_shape)
-    print("block shape:", block_shape)
+    for nblocks in [2, 3, 4, 5]:
+        # Square matrix, square cluster shape, block sum problem. 
+        # Force blocks to be distributed (cyclically?) over compute nodes:
+        # grid shape = k * cluster shape
+        # block shape = elementwise matrix shape / grid shape (should work out
+        #  to blocksize x blocksize).
+        blocksize = 5
+        cluster_shape = (1, blocksize)
+        grid_shape = tuple((1, nblocks))
+        matrix_shape = tuple((blocksize, blocksize*nblocks)) 
+        block_shape = tuple(np.ceil((np.array(matrix_shape) / np.array(grid_shape))).astype(int).tolist())
 
-    app = conftest.mock_cluster(cluster_shape)
-    dtype = np.float64
+        print("cluster shape:", cluster_shape)
+        print("matrix shape:", matrix_shape)
+        print("grid shape:", grid_shape)
+        print("block shape:", block_shape)
 
-    r: BlockArray = app.random.random(shape=matrix_shape,
-                                  block_shape=block_shape,
-                                  dtype=dtype)
-    cluster_state: ClusterState = ClusterState(app.cm.devices())
-    ga: GraphArray = GraphArray.from_ba(r, cluster_state, copy_on_op=True)
-    block_sum_ga = ga.block_sum()
-    
-    # Check that all resources are equally used to start with
-    mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
-    net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
-    net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
-    assert mem_diff == net_in_diff == net_out_diff == 0
+        app = conftest.mock_cluster(cluster_shape)
+        dtype = np.float64
 
-    # Run exhaustive planner, print details of best and worst plans.
-    planner: ExhaustivePlanner = ExhaustivePlanner(16)
-    all_plans = planner.solve(block_sum_ga)
-    plan: Plan = planner.plan
+        r: BlockArray = app.random.random(shape=matrix_shape,
+                                      block_shape=block_shape,
+                                      dtype=dtype)
+        cluster_state: ClusterState = ClusterState(app.cm.devices())
+        ga: GraphArray = GraphArray.from_ba(r, cluster_state, copy_on_op=True)
+        block_sum_ga = ga.block_sum()
+        
+        # Check that all resources are equally used to start with
+        #mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
+        #net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
+        #net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
+        #assert mem_diff == net_in_diff == net_out_diff == 0
 
-    print("Executing plan: ", plan.get_plan_actions())
-    print(">>> cost:", plan.get_cost())
-    start = time.time()
-    result_ga: GraphArray = plan.execute(block_sum_ga)
-    end = time.time()
-    print("Optimal plan exec time:", end - start)
-    start = time.time()
-    planner.pessimal_plan.execute(block_sum_ga)
-    end = time.time()
+        # Run exhaustive planner, print details of best and worst plans.
+        serial_planner: ExhaustivePlanner = ExhaustivePlanner(1, unroll=False, prune=False)
+        all_plans = serial_planner.solve(block_sum_ga)
+        plan: Plan = serial_planner.plan
 
-    rs = plan.get_cluster_state().resources
-    print(">> memory", rs[0])
-    print(">> net_in", rs[1])
-    print(">> net_out", rs[2])
+        print("Number of blocks", nblocks)
+        print("Executing plan: ", plan.get_plan_actions())
+        print(">>> cost:", plan.get_cost())
+        start = time.time()
+        result_ga: GraphArray = plan.execute(block_sum_ga)
+        end = time.time()
+        print("Optimal plan exec time:", end - start)
+        # start = time.time()
+        # planner.pessimal_plan.execute(block_sum_ga)
+        # end = time.time()
 
-    print("Pessimal plan: ", planner.pessimal_plan.get_plan_actions())
-    print(">>> cost:", planner.pessimal_plan.get_cost())
-    print("Pessimal plan exec time:", end - start)
-    pess_rs = planner.pessimal_plan.get_cluster_state().resources
-    print(">> memory", pess_rs[0])
-    print(">> net_in", pess_rs[1])
-    print(">> net_out", pess_rs[2])
+        rs = plan.get_cluster_state().resources
+        print(">> memory", rs[0])
+        print(">> net_in", rs[1])
+        print(">> net_out", rs[2])
 
-    # Print load balancing measures
-    mem_diff = max(rs[0]) - min(rs[0])
-    net_in_diff = max(rs[1]) - min(rs[1])
-    net_out_diff = max(rs[2]) - min(rs[2])
+       # print("Pessimal plan: ", planner.pessimal_plan.get_plan_actions())
+       # print(">>> cost:", planner.pessimal_plan.get_cost())
+       # print("Pessimal plan exec time:", end - start)
+       # pess_rs = planner.pessimal_plan.get_cluster_state().resources
+       # print(">> memory", pess_rs[0])
+       # print(">> net_in", pess_rs[1])
+       # print(">> net_out", pess_rs[2])
 
-    print("Load imbalance (mem, net in, net out):", mem_diff, net_in_diff, net_out_diff)
-    conftest.destroy_mock_cluster(app)
+        # Print load balancing measures
+        mem_diff = max(rs[0]) - min(rs[0])
+        net_in_diff = max(rs[1]) - min(rs[1])
+        net_out_diff = max(rs[2]) - min(rs[2])
+
+        print("Load imbalance (mem, net in, net out):", mem_diff, net_in_diff, net_out_diff)
+        conftest.destroy_mock_cluster(app)
 
 
 if __name__ == "__main__":
     from tests import conftest
 
-    test_block_sum()
+    test_serial_no_pruning()
