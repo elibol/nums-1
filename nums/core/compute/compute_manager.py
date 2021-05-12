@@ -196,7 +196,7 @@ class ComputeManager(ComputeInterface):
         # Softmax on cluster shape gives strong preference to larger dimensions.
         cluster_weights = np.exp(np.array(cluster_shape)) / np.sum(np.exp(cluster_shape))
         shape_fracs = np.array(shape) / np.sum(shape)
-        # cluster_weights weight the proportion of cores available along each axis,
+        # cluster_weights weight the proportion of cores along each axis,
         # and shape_fracs is the proportion of data along each axis.
         weighted_shape_fracs = cluster_weights * shape_fracs
         weighted_shape_fracs = weighted_shape_fracs / np.sum(weighted_shape_fracs)
