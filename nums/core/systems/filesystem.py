@@ -50,7 +50,6 @@ def write_block_s3(block: Any, filename: AnyStr, grid_entry: Tuple, grid_meta: D
 
 
 def read_block_s3(filename: AnyStr, grid_entry: Tuple, grid_meta: Dict):
-    print("reading", filename)
     return StoredArrayS3(filename, ArrayGrid.from_meta(grid_meta)).get(grid_entry)
 
 
