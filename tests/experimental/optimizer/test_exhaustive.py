@@ -25,8 +25,7 @@ import time
 
 import numpy as np
 
-from nums.core.systems.systems import System, SerialSystem, RaySystem
-from nums.core.systems.schedulers import RayScheduler, TaskScheduler, BlockCyclicScheduler
+from nums.core.systems.systems import RaySystem
 from nums.core.array.application import ArrayApplication, BlockArray
 from nums.core.array.base import BlockArrayBase
 
@@ -38,132 +37,118 @@ import conftest
 
 def optimized_tensordot(lhs: BlockArrayBase, rhs: BlockArrayBase, axes,
                         copy_on_op=True) -> BlockArray:
-    system: System = lhs.system
-    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
-        cluster_state = ClusterState(system.scheduler.cluster_shape, system)
-    else:
-        cluster_state = ClusterState((1,), system)
+    cluster_state: ClusterState = ClusterState(lhs.cm.devices())
     lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state, copy_on_op=copy_on_op)
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=copy_on_op)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
     global random_state
+    print("*"*50)
     print("op grid shape", tensordot_ga.grid.grid_shape)
+    result_ga: GraphArray = RandomTS(
+        seed=conftest.rs,
+        max_samples_per_step=1,
+        max_reduction_pairs=1,
+        force_final_action=True).solve(tensordot_ga)
 
-    planner: ExhaustivePlanner = ExhaustivePlanner()
-    planner.solve(tensordot_ga)
-    plan: Plan = planner.plan
-    result_ga: GraphArray = plan.execute(tensordot_ga)
-
+    # print("mem", resources[0] / np.sum(resources[0]))
     print("mem", cluster_state.resources[0])
     print("net_in", cluster_state.resources[1])
     print("net_out", cluster_state.resources[2])
-    return BlockArray(result_ga.grid, system, result_ga.to_blocks())
+    print("*"*50)
+    return BlockArray(result_ga.grid, lhs.cm, result_ga.to_blocks())
 
 
-def traverse(ga: GraphArray):
-    visited = set()
-    root = ga.graphs[0][0]
-    print("graphs type", type(ga.graphs), type(ga.graphs[0]), type(ga.graphs[0][0]))
-    remaining = [root]
-    while len(remaining) > 0:
-        current = remaining.pop(0)
-        print(current)
-        print(type(current))
-        visited.add(str(current.tree_node_id))
-        for c in current.get_children():
-            if c in visited:
-                continue
-            remaining.append(c)
-
-
-def test_matvec(app_inst: ArrayApplication):
+def test_matvec(app_inst_mock_none):
+    app = app_inst_mock_none
     A_shape, A_block_shape = (5, 10), (5, 5)
     x_shape, x_block_shape = (10, 1), (5, 1)
     real_A = np.random.random(np.product(A_shape)).reshape(A_shape)
     real_x = np.random.random(np.product(x_shape)).reshape(x_shape)
-    A: BlockArray = app_inst.array(real_A, A_block_shape)
-    x: BlockArray = app_inst.array(real_x, x_block_shape)
+    A: BlockArray = app.array(real_A, A_block_shape)
+    x: BlockArray = app.array(real_x, x_block_shape)
     result: BlockArray = A @ x
     opt_result: BlockArray = optimized_tensordot(A, x, axes=1)
     assert np.allclose(result.get(), real_A @ real_x)
-    assert app_inst.allclose(result, opt_result).get()
+    assert app.allclose(result, opt_result).get()
 
 
-def test_matmat(app_inst: ArrayApplication):
+def test_matmat(app_inst_mock_none):
+    app = app_inst_mock_none
     X_shape, X_block_shape = (5, 10), (5, 5)
     Y_shape, Y_block_shape = (10, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
     Z: BlockArray = X @ Y
     opt_Z: BlockArray = optimized_tensordot(X, Y, axes=1)
     assert np.allclose(Z.get(), real_X @ real_Y)
-    assert app_inst.allclose(Z, opt_Z).get()
+    assert app.allclose(Z, opt_Z).get()
 
 
-def test_big_matmat(app_inst: ArrayApplication):
+def test_big_matmat(app_inst_mock_none):
+    app = app_inst_mock_none
     num_blocks = 10**3
     X_shape, X_block_shape = (5, 5*num_blocks), (5, 5)
     Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
     Z: BlockArray = X @ Y
     t = time.time()
     opt_Z: BlockArray = optimized_tensordot(X, Y, axes=1)
     print(time.time()-t)
     assert np.allclose(Z.get(), real_X @ real_Y)
-    assert app_inst.allclose(Z, opt_Z).get()
+    assert app.allclose(Z, opt_Z).get()
 
 
-def test_load_sqr():
-    num_nodes = 5
-    app_inst = conftest.mock_cluster((num_nodes, 1))
-    num_blocks = 5
+def test_load_sqr(app_inst_mock_big):
+    app = app_inst_mock_big
+    num_blocks = 6
     X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
     Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
 
     lhs, rhs, axes = X.T, Y, 1
-    system: System = lhs.system
-    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
-        print("ray system, block cyclic")
-        cluster_state: ClusterState = ClusterState(system.scheduler.cluster_shape, system)
-    else:
-        cluster_state: ClusterState = ClusterState((1,), system)
-    lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state, copy_on_op=True)
-    rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state, copy_on_op=True)
+    cluster_state: ClusterState = ClusterState(app.cm.devices())
+    lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state)
+    rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
 
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
     net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
     net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
-    assert mem_diff == net_in_diff == net_out_diff == 0
+#    assert mem_diff == net_in_diff == net_out_diff == 0
     # Block-cyclic distribution of 100 blocks of size 25 over 10 nodes == 10*25 == 250
     # We have 2 such matrices, so expect initial memory to be 500.
-    print(cluster_state.resources)
-    assert max(cluster_state.resources[0]) == (num_blocks/num_nodes)*25*2
-    assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
+#    assert max(cluster_state.resources[0]) == 500
+#    assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
 
-    print("Input GA: ", tensordot_ga)
-    traverse(tensordot_ga)
-    planner: ExhaustivePlanner = ExhaustivePlanner()
-    planner.solve(tensordot_ga)
+    planner: ExhaustivePlanner = ExhaustivePlanner(8)
+    all_plans = planner.solve(tensordot_ga)
     plan: Plan = planner.plan
+
     print("Executing plan: ", plan.get_plan_actions())
     print(">>> cost:", plan.get_cost())
+    start = time.time()
     result_ga: GraphArray = plan.execute(tensordot_ga)
+    end = time.time()
+    print("Optimal plan exec time:", end - start)
+    start = time.time()
+    planner.pessimal_plan.execute(tensordot_ga)
+    end = time.time()
+    opt_result = BlockArray(result_ga.grid, system, result_ga.to_blocks())
+    assert app_inst.allclose(result, opt_result).get()
 
     rs = plan.get_cluster_state().resources
-    print("memory", rs[0])
-    print("net_in", rs[1])
-    print("net_out", rs[2])
-
+    print(">> memory", rs[0])
+    print(">> net_in", rs[1])
+    print(">> net_out", rs[2])
+ 
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
     net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
     net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
@@ -174,36 +159,23 @@ def test_load_sqr():
     print(mem_diff, net_in_diff, net_out_diff)
 
 
-def test_load_single_block_rhs():
-    app_inst = conftest.mock_cluster((10, 1))
-    num_blocks = 100
+def test_load_single_block_rhs(app_inst_mock_big):
+    app = app_inst_mock_big
+    num_blocks = 5
     X_shape, X_block_shape = (5*num_blocks, 5), (5, 5)
-    Y_shape, Y_block_shape = (5, 5), (5, 5)
+    Y_shape, Y_block_shape = (5*num_blocks, 5), (5, 5)
     real_X = np.random.random(np.product(X_shape)).reshape(X_shape)
     real_Y = np.random.random(np.product(Y_shape)).reshape(Y_shape)
-    X: BlockArray = app_inst.array(real_X, X_block_shape)
-    Y: BlockArray = app_inst.array(real_Y, Y_block_shape)
-
+    X: BlockArray = app.array(real_X, X_block_shape)
+    Y: BlockArray = app.array(real_Y, Y_block_shape)
+    result: BlockArray = X.T @ Y
+    assert np.allclose(result.get(), real_X.T @ real_Y)
+    
     lhs, rhs, axes = X, Y, 1
-    system: System = lhs.system
-    if isinstance(system, RaySystem) and isinstance(system.scheduler, BlockCyclicScheduler):
-        cluster_state: ClusterState = ClusterState(system.scheduler.cluster_shape, system)
-    else:
-        cluster_state: ClusterState = ClusterState((1,), system)
+    cluster_state: ClusterState = ClusterState(app.cm.devices())
     lhs_ga: GraphArray = GraphArray.from_ba(lhs, cluster_state)
     rhs_ga: GraphArray = GraphArray.from_ba(rhs, cluster_state)
     tensordot_ga = lhs_ga.tensordot(rhs_ga, axes=axes)
-
-    print("memory", cluster_state.resources[0])
-    print("net_in", cluster_state.resources[1])
-    print("net_out", cluster_state.resources[2])
-    mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
-    net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
-    net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
-    print(mem_diff, net_in_diff, net_out_diff)
-    assert mem_diff == 25  # b/c single block array is placed in node 1.
-    assert net_in_diff == net_out_diff == 0
-    assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
     result_ga: GraphArray = RandomTS(
         seed=np.random.RandomState(1337),
         max_samples_per_step=1,
@@ -212,6 +184,17 @@ def test_load_single_block_rhs():
     print("memory", cluster_state.resources[0])
     print("net_in", cluster_state.resources[1])
     print("net_out", cluster_state.resources[2])
+    print("memory", cluster_state.resources[0])
+    print("net_in", cluster_state.resources[1])
+    print("net_out", cluster_state.resources[2])
+    mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
+    net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
+    net_out_diff = max(cluster_state.resources[2]) - min(cluster_state.resources[2])
+    print(mem_diff, net_in_diff, net_out_diff)
+    
+    assert mem_diff == 25  # b/c single block array is placed in node 1.
+    assert net_in_diff == net_out_diff == 0
+    assert max(cluster_state.resources[1]) == max(cluster_state.resources[2]) == 0
 
     mem_diff = max(cluster_state.resources[0]) - min(cluster_state.resources[0])
     net_in_diff = max(cluster_state.resources[1]) - min(cluster_state.resources[1])
@@ -221,11 +204,15 @@ def test_load_single_block_rhs():
 
 
 if __name__ == "__main__":
-    from tests import conftest
+    import conftest
 
-    app_inst = conftest.get_app("ray-cyclic")
-#    test_matvec(app_inst)
-#    test_matmat(app_inst)
-#    test_big_matmat(app_inst)
-    test_load_sqr()
-#    test_load_single_block_rhs()
+#    app = conftest.mock_cluster((1, 1))
+#    test_matvec(app)
+#    test_matmat(app)
+#    test_big_matmat(app)
+#    conftest.destroy_mock_cluster(app)
+
+    app = conftest.mock_cluster((5, 1))
+    test_load_sqr(app)
+#    test_load_single_block_rhs(app)
+    conftest.destroy_mock_cluster(app)

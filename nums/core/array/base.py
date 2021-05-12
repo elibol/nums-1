@@ -49,6 +49,11 @@ class Block(object):
     def __repr__(self):
         return "Block(" + str(self.oid) + ")"
 
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        d.pop("_cm")
+        return d
+
     def size(self):
         return np.product(self.shape)
 
