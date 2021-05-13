@@ -17,7 +17,6 @@
 from typing import List
 
 import numpy as np
-from nums.core.array.base import Block
 from nums.core.grid.grid import DeviceID
 
 
@@ -54,8 +53,8 @@ class ClusterState(object):
         # We make an assumption about the device to resource mapping.
         for i, device_id in enumerate(self.device_ids):
             assert device_id.node_id == i
-        # Dict from block id to Block.
-        self.blocks: [int, Block] = {}
+        # Dict from block id to block size.
+        self.block_sizes: [int, int] = {}
         # Dict from block id to list of device id.
         self.block_devices: [int, List[DeviceID]] = {}
 
@@ -64,22 +63,22 @@ class ClusterState(object):
         # Copy resources.
         new_cluster.resources = self.resources.copy()
         # Copy blocks.
-        for block_id in self.blocks:
+        for block_id in self.block_sizes:
             # Don't copy blocks themselves. Updating references is enough.
-            new_cluster.blocks[block_id] = self.blocks[block_id]
+            new_cluster.block_sizes[block_id] = self.block_sizes[block_id]
             new_cluster.block_devices[block_id] = list(self.block_devices[block_id])
         return new_cluster
 
     # Block Ops.
 
-    def add_block(self, block: Block, device_ids: List[DeviceID]):
+    def add_block(self, block_id: int, block_size: int, device_ids: List[DeviceID]):
         # This is a strong assertion and may not make sense once this class is fully integrated.
-        assert block.id not in self.blocks and block.id not in self.block_devices
-        self.blocks[block.id] = block
-        self.block_devices[block.id] = device_ids
+        assert block_id not in self.block_sizes and block_id not in self.block_devices
+        self.block_sizes[block_id] = block_size
+        self.block_devices[block_id] = device_ids
 
-    def get_block(self, block_id: int) -> Block:
-        return self.blocks[block_id]
+    def _get_block_size(self, block_id: int) -> int:
+        return self.block_sizes[block_id]
 
     def get_block_device_ids(self, block_id: int):
         return self.block_devices[block_id]
@@ -102,14 +101,13 @@ class ClusterState(object):
         return len(self.mutual_devices(block_id_a, block_id_b)) > 0
 
     def init_mem_load(self, device_id: DeviceID, block_id: int):
-        block: Block = self.get_block(block_id)
+        size: int = self._get_block_size(block_id)
         block_device_ids: list = self.get_block_device_ids(block_id)
         assert device_id in block_device_ids
-        size = block.size()
         self.resources[self.mem_idx][device_id.node_id] += size
 
     def simulate_copy_block(self, block_id: int, to_device_id: DeviceID, resources: np.ndarray):
-        block: Block = self.get_block(block_id)
+        size: int = self._get_block_size(block_id)
         block_device_ids: List[DeviceID] = self.get_block_device_ids(block_id)
         if to_device_id in block_device_ids:
             return resources
@@ -118,7 +116,6 @@ class ClusterState(object):
         # though we really don't have control over this.
         from_device_id: DeviceID = block_device_ids[0]
         # Update load.
-        size = block.size()
         resources[self.net_out_idx][from_device_id.node_id] += size
         resources[self.net_in_idx][to_device_id.node_id] += size
         resources[self.mem_idx][to_device_id.node_id] += size

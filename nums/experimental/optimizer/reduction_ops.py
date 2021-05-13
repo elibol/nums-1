@@ -201,8 +201,8 @@ class ReductionOp(TreeNode):
                 else:
                     # Restrict node ids to the nodes on which the leafs already reside.
                     device_ids = self.cluster_state.union_devices(
-                        self.leafs_dict[leaf_id_pair[0]].block_id,
-                        self.leafs_dict[leaf_id_pair[1]].block_id)
+                        self.leafs_dict[leaf_id_pair[0]].block.id,
+                        self.leafs_dict[leaf_id_pair[1]].block.id)
                 for device_id in device_ids:
                     actions.append((self.tree_node_id, {"device_id": device_id,
                                                         "leaf_ids": leaf_id_pair}))
@@ -215,8 +215,8 @@ class ReductionOp(TreeNode):
         assert isinstance(left, Leaf) and isinstance(right, Leaf)
         resources = self.cluster_state.resources.copy()
         resources = self.cluster_state.simulate_op(self._mem_cost(leafs),
-                                                   left.block_id,
-                                                   right.block_id,
+                                                   left.block.id,
+                                                   right.block.id,
                                                    device_id,
                                                    resources)
         return resources
@@ -239,13 +239,13 @@ class ReductionOp(TreeNode):
         # Update the cluster state after computing the leaf, so that transfer costs are properly
         # captured by leaf node computations.
         self.cluster_state.commit_op(self._mem_cost(leafs),
-                                     left.block_id,
-                                     right.block_id,
+                                     left.block.id,
+                                     right.block.id,
                                      device_id)
         # Update cluster state with new block.
-        self.cluster_state.add_block(new_block, [device_id])
-        assert self.cluster_state.blocks_local(left.block_id, right.block_id)
-        assert self.cluster_state.blocks_local(left.block_id, new_leaf.block_id)
+        self.cluster_state.add_block(new_block.id, new_block.size(), [device_id])
+        assert self.cluster_state.blocks_local(left.block.id, right.block.id)
+        assert self.cluster_state.blocks_local(left.block.id, new_leaf.block.id)
         # The following are mutating operations.
         # Set the new leaf's parent to this node.
         new_leaf.parent = self
@@ -268,8 +268,8 @@ class ReductionOp(TreeNode):
             return self
 
     def _collapse(self, device_id: DeviceID, left: Leaf, right: Leaf, plan_only):
-        lblock: Block = self.cluster_state.get_block(left.block_id)
-        rblock: Block = self.cluster_state.get_block(right.block_id)
+        lblock: Block = left.block
+        rblock: Block = right.block
         if self.op_name == "matmul":
             op_name, args = "tensordot", {"axes": 1}
             assert lblock.shape[1] == rblock.shape[0]
@@ -279,7 +279,7 @@ class ReductionOp(TreeNode):
         block: Block = lblock.bop(op_name, rblock, args=args,
                                   device_id=device_id, plan_only=plan_only)
         leaf: Leaf = Leaf(self.cluster_state)
-        leaf.block_id = block.id
+        leaf.block = block
         leaf.copy_on_op = self.copy_on_op
         return leaf, block
 
@@ -290,12 +290,12 @@ class ReductionOp(TreeNode):
         shape = None
         for leaf in leafs:
             assert leaf.tree_node_id in self.leafs_dict
-            leaf_block: Block = self.cluster_state.get_block(leaf.block_id)
+            leaf_block: Block = leaf.block
             if shape is None:
                 shape = leaf_block.shape
             else:
                 assert leaf_block.shape == shape
-        leaf_block: Block = self.cluster_state.get_block(leafs[0].block_id)
+        leaf_block: Block = leafs[0].block
         return leaf_block.size()
 
     def shape(self):
@@ -419,7 +419,7 @@ class TreeReductionOp(TreeNode):
             for tree_node in tree_nodes:
                 assert isinstance(tree_node, Leaf)
                 leaf: Leaf = tree_node
-                if device_id in self.cluster_state.get_block_device_ids(leaf.block_id):
+                if device_id in self.cluster_state.get_block_device_ids(leaf.block.id):
                     if leaf.tree_node_id not in leaf_set:
                         grouped_leafs[device_id].add(leaf.tree_node_id)
                         leaf_set.add(leaf.tree_node_id)
@@ -436,7 +436,7 @@ class TreeReductionOp(TreeNode):
             # Restrict node ids to the nodes on which the leafs already reside.
             left: Leaf = self.leafs_dict[leaf_ids[0]]
             right: Leaf = self.leafs_dict[leaf_ids[1]]
-            device_ids = self.cluster_state.union_devices(left.block_id, right.block_id)
+            device_ids = self.cluster_state.union_devices(left.block.id, right.block.id)
         for device_id in device_ids:
             actions.append((self.tree_node_id, {"device_id": device_id, "leaf_ids": leaf_ids}))
         return actions
@@ -467,8 +467,8 @@ class TreeReductionOp(TreeNode):
         assert isinstance(left, Leaf) and isinstance(right, Leaf)
         resources = self.cluster_state.resources.copy()
         resources = self.cluster_state.simulate_op(self._mem_cost(leafs),
-                                                   left.block_id,
-                                                   right.block_id,
+                                                   left.block.id,
+                                                   right.block.id,
                                                    device_id,
                                                    resources)
         return resources
@@ -491,13 +491,13 @@ class TreeReductionOp(TreeNode):
         # Update the cluster state after computing the leaf, so that transfer costs are properly
         # captured by leaf node computations.
         self.cluster_state.commit_op(self._mem_cost(leafs),
-                                     left.block_id,
-                                     right.block_id,
+                                     left.block.id,
+                                     right.block.id,
                                      device_id)
         # Update cluster state with new block.
-        self.cluster_state.add_block(new_block, [device_id])
-        assert self.cluster_state.blocks_local(left.block_id, right.block_id)
-        assert self.cluster_state.blocks_local(left.block_id, new_leaf.block_id)
+        self.cluster_state.add_block(new_block.id, new_block.size(), [device_id])
+        assert self.cluster_state.blocks_local(left.block.id, right.block.id)
+        assert self.cluster_state.blocks_local(left.block.id, new_leaf.block.id)
         # The following are mutating operations.
         # Set the new leaf's parent to this node.
         new_leaf.parent = self
@@ -519,8 +519,8 @@ class TreeReductionOp(TreeNode):
         return self
 
     def _collapse(self, device_id: DeviceID, left: Leaf, right: Leaf, plan_only):
-        lblock: Block = self.cluster_state.get_block(left.block_id)
-        rblock: Block = self.cluster_state.get_block(right.block_id)
+        lblock: Block = left.block
+        rblock: Block = right.block
         if self.op_name == "matmul":
             op_name, args = "tensordot", {"axes": 1}
             assert lblock.shape[1] == rblock.shape[0]
@@ -529,7 +529,7 @@ class TreeReductionOp(TreeNode):
             assert lblock.shape == rblock.shape
         block: Block = lblock.bop(op_name, rblock, args=args, device_id=device_id, plan_only=plan_only)
         leaf: Leaf = Leaf(self.cluster_state)
-        leaf.block_id = block.id
+        leaf.block = block
         leaf.copy_on_op = self.copy_on_op
         return leaf, block
 
@@ -540,12 +540,12 @@ class TreeReductionOp(TreeNode):
         shape = None
         for leaf in leafs:
             assert leaf.tree_node_id in self.leafs_dict
-            leaf_block: Block = self.cluster_state.get_block(leaf.block_id)
+            leaf_block: Block = leaf.block
             if shape is None:
                 shape = leaf_block.shape
             else:
                 assert leaf_block.shape == shape
-        leaf_block: Block = self.cluster_state.get_block(leafs[0].block_id)
+        leaf_block: Block = leafs[0].block
         return leaf_block.size()
 
     def shape(self):

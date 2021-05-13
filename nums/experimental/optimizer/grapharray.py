@@ -45,12 +45,12 @@ class GraphArray(object):
             cm: ComputeManager = ComputeManager.instance
             device_id: DeviceID = cm.device_grid.get_device_id(block.true_grid_entry(),
                                                                block.true_grid_shape())
-            cluster_state.add_block(block, device_ids=[device_id])
+            cluster_state.add_block(block.id, block.size(), device_ids=[device_id])
             cluster_state.init_mem_load(device_id, block.id)
 
             # Create the leaf representing this block for future computations.
             leaf: Leaf = Leaf(cluster_state)
-            leaf.block_id = block.id
+            leaf.block = block
             leaf.copy_on_op = copy_on_op
             graphs[grid_entry] = leaf
         return graphs
@@ -98,7 +98,7 @@ class GraphArray(object):
         for grid_entry in self.grid.get_entry_iterator():
             leaf: TreeNode = self.graphs[grid_entry]
             assert isinstance(leaf, Leaf), "%s,%s" % (str(leaf), type(leaf))
-            blocks[grid_entry] = self.cluster_state.get_block(leaf.block_id)
+            blocks[grid_entry] = leaf.block
         return blocks
 
     def other_to_ba(self, other):

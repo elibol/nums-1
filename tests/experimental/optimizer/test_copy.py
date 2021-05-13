@@ -63,7 +63,7 @@ def graphs_equal(ga1: GraphArray, ga2: GraphArray):
             assert n1.parent.tree_node_id == n2.parent.tree_node_id
         assert type(n1) == type(n2)
         if type(n1) is Leaf:
-            assert n1.block_id == n2.block_id
+            assert n1.block.id == n2.block.id
         elif type(n1) is UnaryOp:
             assert n1.op_name == n2.op_name
             assert n1.child.tree_node_id == n2.child.tree_node_id
