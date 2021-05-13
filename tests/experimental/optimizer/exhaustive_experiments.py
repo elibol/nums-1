@@ -152,9 +152,9 @@ def test_naive_parallel_no_pruning():
         # block shape = elementwise matrix shape / grid shape (should work out
         #  to blocksize x blocksize).
         blocksize = 5
-        cluster_shape = (1, blocksize)
-        grid_shape = tuple((1, nblocks))
-        matrix_shape = tuple((blocksize, blocksize*nblocks)) 
+        cluster_shape = (blocksize, 1)
+        grid_shape = tuple((nblocks, 1))
+        matrix_shape = tuple((blocksize*nblocks, blocksize)) 
         block_shape = tuple(np.ceil((np.array(matrix_shape) / np.array(grid_shape))).astype(int).tolist())
 
         print("cluster shape:", cluster_shape)
@@ -241,9 +241,9 @@ def test_unroll_parallel_no_pruning():
         # block shape = elementwise matrix shape / grid shape (should work out
         #  to blocksize x blocksize).
         blocksize = 5
-        cluster_shape = (1, blocksize)
-        grid_shape = tuple((1, nblocks))
-        matrix_shape = tuple((blocksize, blocksize*nblocks)) 
+        cluster_shape = (blocksize, 1)
+        grid_shape = tuple((nblocks, 1))
+        matrix_shape = tuple((blocksize*nblocks, blocksize)) 
         block_shape = tuple(np.ceil((np.array(matrix_shape) / np.array(grid_shape))).astype(int).tolist())
 
         print("cluster shape:", cluster_shape)
