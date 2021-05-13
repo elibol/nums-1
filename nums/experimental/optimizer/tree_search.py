@@ -369,13 +369,15 @@ class SubtreeRoot:
 
 
 class ExhaustiveProcess(multiprocessing.Process):
-    def __init__(self, thread_id, start_points, queue, nprocs, timestamp_queue):
+    def __init__(self, thread_id, start_points, queue, nprocs, timestamp_queue, unroll=True, prune=True):
         multiprocessing.Process.__init__(self)
         self.thread_id = thread_id
         self.queue = queue
         self.nprocs = nprocs
         self.start_points = start_points
         self.ts_queue = timestamp_queue
+        self.unroll = unroll
+        self.prune = prune
 
     def add_subtree(self, subtree):
         self.start_points.append(subtree)
@@ -386,7 +388,7 @@ class ExhaustiveProcess(multiprocessing.Process):
         search_time = 0
         for start_point in self.start_points:
             plans = []
-            planner = ExhaustivePlanner(self.nprocs)
+            planner = ExhaustivePlanner(self.nprocs, unroll=self.unroll, prune=self.prune)
             t0 = time.time()
             planner.make_plan_helper(start_point.state, start_point.cost, start_point.depth, start_point.plan, plans, None) #or make plan?
             t1 = time.time()
@@ -412,6 +414,7 @@ class ExhaustivePlanner(object):
         self.pessimal_plan = Plan(self.max_reduction_pairs, force_final_action)
 
     def find_best_and_worst_plans(self, all_plans):
+        assert len(all_plans) > 0
         min_cost = all_plans[0][1] # cost is the second entry in the tuples
         max_cost = all_plans[0][1]
         print("Total plans: ", len(all_plans))
@@ -435,6 +438,7 @@ class ExhaustivePlanner(object):
         actions = self.get_frontier_actions(state)
 
         unroll = True
+        print("Initial # actions", len(actions))
         if self.nprocs <= len(actions):
             unroll = False
 
@@ -493,9 +497,10 @@ class ExhaustivePlanner(object):
                     subtree_id += 1
 
         # Round robin pickup of tasks
+        print("# Subtrees", len(subtrees))
         for i in range(len(subtrees)):
             if i < self.nprocs:
-                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs, ts_queue))
+                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs, ts_queue, unroll=self.unroll, prune=self.prune))
             else:
                 processes[i % self.nprocs].add_subtree(subtrees[i])
 
@@ -554,13 +559,13 @@ class ExhaustivePlanner(object):
             next_plan.append(cluster_state, tree_node, a, step_cost, next_state.arr.cluster_state, is_done)
             # self.make_plan_helper(next_state, step_cost, next_plan, all_plans)
             # processes.append(ExhaustiveProcess(i, next_state, step_cost, next_plan, q, self.nprocs))
-            subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan))
+            subtrees.append(SubtreeRoot(i, next_state, step_cost, next_plan, 1))
 
 
         # Round robin pickup of tasks
         for i in range(len(subtrees)):
             if i < self.nprocs:
-                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs, ts_queue))
+                processes.append(ExhaustiveProcess(i, [subtrees[i]], q, self.nprocs, ts_queue, unroll=self.unroll, prune=self.prune))
             else:
                 processes[i % self.nprocs].add_subtree(subtrees[i])
 
@@ -614,6 +619,7 @@ class ExhaustivePlanner(object):
 #            return
 
         if self.prune and min_cost is not None and cost > min_cost:
+#            print("Pruning $$ path")
             return min_cost
 
         # Get all actions possible from current frontier.
@@ -626,6 +632,8 @@ class ExhaustivePlanner(object):
         if len(actions) == 0:
 #            print("encountered base case, depth", depth)
             all_plans.append((plan, cost))
+            if len(all_plans) % 100000 == 0:
+                print("Found 100k plans")
             if min_cost is None or cost < min_cost:
                 min_cost = cost
             return min_cost
@@ -674,7 +682,7 @@ class ExhaustivePlanner(object):
             all_plans = self.make_plan_parallel(state)
         t1 = time.time()
         print("Time to make plan:", t1-t0)
-        return all_plans
+        return (all_plans, t1 - t0)
 
     def serialize(self, pessimal=False, filename=None):
         p = self.plan
