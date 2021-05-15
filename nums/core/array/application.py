@@ -727,6 +727,28 @@ class ArrayApplication(object):
     def qr(self, X: BlockArray):
         return self.indirect_tsqr(X)
 
+    def _qr_tree_reduce(self, oid_list, result_grid_entry, result_grid_shape):
+        if len(oid_list) == 1:
+            return oid_list[0][0]
+        q = oid_list
+        while len(q) > 1:
+            a_oid, a_ge, a_gs = q.pop(0)
+            b_oid, _, _ = q.pop(0)
+            ge, gs = (result_grid_entry, result_grid_shape) if len(q) == 0 else (a_ge, a_gs)
+            c_oid = self.cm.qr(a_oid, b_oid,
+                               mode="r",
+                               axis=0,
+                               syskwargs={
+                                   "grid_entry": ge,
+                                   "grid_shape": gs,
+                                   "options": {settings.ray_num_returns_str: 1}
+                               })
+            q.append((c_oid, ge, gs))
+        r_oid, r_ge, r_gs = q.pop(0)
+        assert r_ge == result_grid_entry
+        assert r_gs == result_grid_shape
+        return r_oid
+
     def indirect_tsr(self, X: BlockArray, reshape_output=True):
         assert len(X.shape) == 2
         # TODO (hme): This assertion is temporary and ensures returned
@@ -744,15 +766,16 @@ class ArrayApplication(object):
             row = []
             for j in range(grid_shape[1]):
                 row.append(X.blocks[i, j].oid)
-            R_oids.append(self.cm.qr(*row,
-                                     mode="r",
-                                     axis=1,
-                                     syskwargs={
-                                         "grid_entry": (i, 0),
-                                         "grid_shape": (grid_shape[0], 1),
-                                         "options": {settings.ray_num_returns_str: 1}
-                                     })
-                          )
+            ge, gs = (i, 0), (grid_shape[0], 1)
+            oid = self.cm.qr(*row,
+                             mode="r",
+                             axis=1,
+                             syskwargs={
+                                 "grid_entry": ge,
+                                 "grid_shape": gs,
+                                 "options": {settings.ray_num_returns_str: 1}
+                             })
+            R_oids.append((oid, ge, gs))
 
         # Construct R by summing over R blocks.
         # TODO (hme): Communication may be inefficient due to redundancy of data.
@@ -762,14 +785,8 @@ class ArrayApplication(object):
                                    block_shape=R_shape,
                                    dtype=X.dtype.__name__),
                          self.cm)
-        tsR.blocks[0, 0].oid = self.cm.qr(*R_oids,
-                                          mode="r",
-                                          axis=0,
-                                          syskwargs={
-                                              "grid_entry": (0, 0),
-                                              "grid_shape": (1, 1),
-                                              "options": {settings.ray_num_returns_str: 1}
-                                          })
+        tsR.blocks[0, 0].oid = self._qr_tree_reduce(R_oids, (0, 0), (1, 1))
+
         # If blocking is "tall-skinny," then we're done.
         if R_shape != R_block_shape:
             if reshape_output:
@@ -779,6 +796,59 @@ class ArrayApplication(object):
         else:
             R = tsR
         return R
+
+    # def indirect_tsr(self, X: BlockArray, reshape_output=True):
+    #     assert len(X.shape) == 2
+    #     # TODO (hme): This assertion is temporary and ensures returned
+    #     #  shape of qr of block is correct.
+    #     assert X.block_shape[0] >= X.shape[1]
+    #     # Compute R for each block.
+    #     grid = X.grid
+    #     grid_shape = grid.grid_shape
+    #     shape = X.shape
+    #     block_shape = X.block_shape
+    #     R_oids = []
+    #     # Assume no blocking along second dim.
+    #     for i in range(grid_shape[0]):
+    #         # Select a row according to block_shape.
+    #         row = []
+    #         for j in range(grid_shape[1]):
+    #             row.append(X.blocks[i, j].oid)
+    #         R_oids.append(self.cm.qr(*row,
+    #                                  mode="r",
+    #                                  axis=1,
+    #                                  syskwargs={
+    #                                      "grid_entry": (i, 0),
+    #                                      "grid_shape": (grid_shape[0], 1),
+    #                                      "options": {settings.ray_num_returns_str: 1}
+    #                                  })
+    #                       )
+    #
+    #     # Construct R by summing over R blocks.
+    #     # TODO (hme): Communication may be inefficient due to redundancy of data.
+    #     R_shape = (shape[1], shape[1])
+    #     R_block_shape = (block_shape[1], block_shape[1])
+    #     tsR = BlockArray(ArrayGrid(shape=R_shape,
+    #                                block_shape=R_shape,
+    #                                dtype=X.dtype.__name__),
+    #                      self.cm)
+    #     tsR.blocks[0, 0].oid = self.cm.qr(*R_oids,
+    #                                       mode="r",
+    #                                       axis=0,
+    #                                       syskwargs={
+    #                                           "grid_entry": (0, 0),
+    #                                           "grid_shape": (1, 1),
+    #                                           "options": {settings.ray_num_returns_str: 1}
+    #                                       })
+    #     # If blocking is "tall-skinny," then we're done.
+    #     if R_shape != R_block_shape:
+    #         if reshape_output:
+    #             R = tsR.reshape(R_shape, block_shape=R_block_shape)
+    #         else:
+    #             R = tsR
+    #     else:
+    #         R = tsR
+    #     return R
 
     def indirect_tsqr(self, X: BlockArray, reshape_output=True):
         shape = X.shape
