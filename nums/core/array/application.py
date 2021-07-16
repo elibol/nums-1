@@ -873,6 +873,54 @@ class ArrayApplication(object):
         Q = X @ R_inverse
         return Q, R
 
+    def qr_recursive(self, Q_oids, R_oids):
+        # Assume A is 8n x n (8 nxn partitions).
+        # Q, R = qr(A) yields Q and R that are n x n.
+        # Q_oids will be 8 Q values of nxn.
+        # R_oids will be 8 R values of nxn.
+        def qr_fact(R1, R2):
+            # R1, R2 is nxn.
+            # Q, R = qr(concat(R1, R2, axis=0))
+            # where Q is 2nxn and R is nxn,
+            # split into Q1, Q2 row-wise, each of which are nxn.
+            return self.cm.qr(R1, R2,
+                              mode="reduced",
+                              axis=0,
+                              syskwargs={
+                                  # TODO: Optimize grid entry grid shape.
+                                  "grid_entry": (0, 0),
+                                  "grid_shape": (1, 1),
+                                  "options": {settings.ray_num_returns_str: 2}
+                              })
+
+        if len(R_oids) == 2:
+            Q12_oid, Q22_oid, R_oid = qr_fact(*R_oids)
+            Q11_oid, Q21_oid = Q_oids
+            Q_res1 = Q11_oid @ Q12_oid
+            Q_res2 = Q21_oid @ Q22_oid
+            return [Q_res1, Q_res2], R_oid
+        else:
+            # Split Q and R oids.
+            half = len(Q_oids)//2
+            Q_top, Q_bottom = Q_oids[:half], Q_oids[half:]
+            R_top, R_bottom = R_oids[:half], R_oids[half:]
+            Q_top_res, R_top_res = self.qr_recursive(Q_top, R_top)
+            Q_bottom_res, R_bottom_res = self.qr_recursive(Q_bottom, R_bottom)
+
+            Q_res = []
+
+            Q1, Q2, R = qr_fact(R_top_res, R_bottom_res)
+            for i in range(len(Q_top)):
+                Q_i = Q_top[i]
+                Q_i_res = Q_top_res[i]
+                Q_res.append(Q_i @ Q_i_res @ Q1)
+            for i in range(len(Q_bottom)):
+                Q_i = Q_bottom[i]
+                Q_i_res = Q_bottom_res[i]
+                Q_res.append(Q_i @ Q_i_res @ Q2)
+
+            return Q_res, R
+
     def direct_tsqr(self, X, reshape_output=True):
         assert len(X.shape) == 2
 
@@ -908,6 +956,8 @@ class ArrayApplication(object):
                                       })
             R_oids.append(R_oid)
             Q_oids.append(Q_oid)
+
+        Q, R = self.qr_recursive(Q_oids, R_oids)
 
         # TODO (hme): This pulls several order N^2 R matrices on a single node.
         #  A solution is the recursive extension to direct TSQR.
